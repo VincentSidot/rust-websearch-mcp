@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
+use core::Document;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
-use core::{Document};
 
 /// CLI for the websearch pipeline
 #[derive(Parser)]
@@ -23,23 +23,23 @@ enum Commands {
     Analyze {
         /// Path to the scraped document
         path: String,
-        
+
         /// Number of top segments to select
         #[clap(long, default_value = "10")]
         top_n: usize,
-        
+
         /// MMR lambda parameter (0.0 = centroid only, 1.0 = diversity only)
         #[clap(long, default_value = "0.65")]
         mmr_lambda: f32,
-        
+
         /// Batch size for inference
         #[clap(long, default_value = "8")]
         batch_size: usize,
-        
+
         /// Maximum sequence length
         #[clap(long, default_value = "512")]
         max_seq_len: usize,
-        
+
         /// Output file path (stdout if not provided)
         #[clap(short, long)]
         output: Option<String>,
@@ -64,8 +64,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Scraping URL: {}", url);
             // TODO: Implement scraping
         }
-        Commands::Analyze { path, top_n, mmr_lambda, batch_size, max_seq_len, output } => {
-            analyze_document(path, *top_n, *mmr_lambda, *batch_size, *max_seq_len, output.as_deref())?;
+        Commands::Analyze {
+            path,
+            top_n,
+            mmr_lambda,
+            batch_size,
+            max_seq_len,
+            output,
+        } => {
+            analyze_document(
+                path,
+                *top_n,
+                *mmr_lambda,
+                *batch_size,
+                *max_seq_len,
+                output.as_deref(),
+            )?;
         }
         Commands::Summarize { path } => {
             println!("Summarizing document: {}", path);
@@ -76,63 +90,65 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // TODO: Implement full pipeline
         }
     }
-    
+
     Ok(())
 }
 
 fn analyze_document(
-    path: &str, 
-    top_n: usize, 
+    path: &str,
+    top_n: usize,
     mmr_lambda: f32,
     batch_size: usize,
     max_seq_len: usize,
-    output: Option<&str>
+    output: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Analyzing document: {}", path);
-    
+
     // Load document
     let file = File::open(path)?;
     let reader = BufReader::new(file);
     let document: Document = serde_json::from_reader(reader)?;
-    
+
     // Create analyzer configuration
     let config = analyzer::config::AnalyzerConfig {
         backend: "onnx".to_string(),
-        model: analyzer::config::ModelConfig::HuggingFace(analyzer::config::HuggingFaceModelConfig {
-            repo_id: "BAAI/bge-small-en-v1.5".to_string(),
-            revision: "5c3b096d65c1aaa0213ced13dac076708b40c077".to_string(),
-            files: vec![
-                "onnx/model.onnx".to_string(),
-                "tokenizer.json".to_string(),
-                "special_tokens_map.json".to_string(),
-            ],
-        }),
+        model: analyzer::config::ModelConfig::HuggingFace(
+            analyzer::config::HuggingFaceModelConfig {
+                repo_id: "BAAI/bge-small-en-v1.5".to_string(),
+                revision: "main".to_string(),
+                files: vec![
+                    "onnx/model.onnx".to_string(),
+                    "tokenizer.json".to_string(),
+                    "special_tokens_map.json".to_string(),
+                ],
+            },
+        ),
         mmr_lambda,
         top_n,
         rerank: false,
         reranker_model_id: "".to_string(),
         allow_downloads: true,
     };
-    
+
     // Create analyzer
     let mut analyzer = analyzer::Analyzer::new(config)?;
-    
+
     // Log model info
     println!("Model ID: {}", analyzer.model_fingerprint());
     println!("Embedding dimension: 384");
     println!("Batch size: {}", batch_size);
     println!("Max sequence length: {}", max_seq_len);
-    
+
     // Record start time
     let start_time = std::time::Instant::now();
-    
+
     // Analyze document
     let response = analyzer.analyze(&document)?;
-    
+
     // Record end time
     let duration = start_time.elapsed();
     println!("Document analysis completed in {:?}", duration);
-    
+
     // Write output
     if let Some(output_path) = output {
         let file = File::create(output_path)?;
@@ -141,7 +157,7 @@ fn analyze_document(
     } else {
         serde_json::to_writer_pretty(std::io::stdout(), &response)?;
     }
-    
+
     println!("Analysis complete");
     Ok(())
 }

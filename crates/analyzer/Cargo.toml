@@ -2,6 +2,7 @@
 name = "analyzer"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs" 
 
 [dependencies]
 # Core dependencies
@@ -12,8 +13,6 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
 
-# ONNX Runtime for inference
-ort = "2.0.0-rc.8"
 
 # Tokenizers for text processing
 tokenizers = "0.20"
@@ -39,6 +38,19 @@ thiserror = "1.0"
 # Numerical computing
 ndarray = "0.15"
 
+# ONNX Runtime (target-specific)
+[target.'cfg(target_os = "windows")'.dependencies]
+ort = { version = "2.0.0-rc.8", features = ["load-dynamic"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ort = { version = "2.0.0-rc.8", features = ["download-binaries"] }
+
 [dev-dependencies]
 # Testing utilities
 tempfile = "3.0"
+
+[build-dependencies]
+# For the build script (Windows): download + unzip a .nupkg (zip)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
+zip = "4.5.0"
+anyhow = "1"
