@@ -8,7 +8,7 @@
 ///
 /// This function sets up the logger with a default level of INFO.
 /// The log level can be controlled via the RUST_LOG environment variable.
-/// For example: `RUST_LOG=debug` or `RUST_LOG=rust_websearch_mcp=trace`
+/// For example: `RUST_LOG=debug` or `RUST_LOG=websearch=trace`
 ///
 /// This function only has an effect when the `logger` feature is enabled.
 

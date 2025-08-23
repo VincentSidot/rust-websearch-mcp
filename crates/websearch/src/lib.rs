@@ -6,7 +6,6 @@ use std::error::Error;
 pub mod config;
 pub mod formatter;
 pub mod logger;
-pub mod embedding;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ScrapeRequest {
@@ -45,7 +44,7 @@ pub struct ErrorResponse {
 /// # Example
 ///
 /// ```
-/// use rust_websearch_mcp::scrape_webpage;
+/// use websearch::scrape_webpage;
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -59,7 +58,7 @@ pub async fn scrape_webpage(url: &str) -> Result<ScrapeResponse, Box<dyn Error>>
 
     // Create a client with a proper user-agent header
     let client = Client::builder()
-        .user_agent("rust-websearch-mcp/0.1 (https://github.com/your-username/rust-websearch-mcp)")
+        .user_agent("websearch/0.1 (https://github.com/your-username/rust-websearch-mcp)")
         .build()?;
 
     // Fetch the webpage content

@@ -24,16 +24,27 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
 
 ## 0) Workspace Restructure
 
-- [ ] Convert repo into a **Cargo workspace**:
+- [x] Convert repo into a **Cargo workspace**:
   - `crates/websearch` → existing scraper (move current crate here).
   - `crates/analyzer` → embeddings + MMR + optional cross-encoder (local).
   - `crates/summarizer` → LLM summarization (OpenAI-compatible).
   - `crates/core` → shared schemas, types, errors.
-  - `bin/cli.rs` → orchestrator CLI (`run`, `scrape`, `analyze`, `summarize`).
+  - `crates/cli` → orchestrator CLI (`run`, `scrape`, `analyze`, `summarize`).
 
 **Acceptance**
 - Workspace builds with one `cargo build`.
 - `cargo run --bin cli run <url>` executes scraper → analyzer → summarizer.
+
+### Progress Log
+
+- **2025-08-23**: M1: Workspace scaffolding (move scraper → crates/websearch)
+  - Restructured repository into a Cargo workspace with four crates: `core`, `websearch`, `analyzer`, and `summarizer`
+  - Moved the existing scraper code to `crates/websearch` and updated all references
+  - Created empty stub crates for `core`, `analyzer`, and `summarizer`
+  - Created a new `cli` crate as the orchestrator entry point
+  - Added top-level configuration files (`config.example.toml`, `.env.example`, `README.md`)
+  - Added fixture directories for future testing
+  - Verified that `cargo build` succeeds at the workspace root
 
 ---
 

@@ -1,0 +1,53 @@
+# Example configuration file for the websearch pipeline
+
+[scraper]
+# Timeout for HTTP requests (in seconds)
+timeout = 30
+
+# User agent string to use for requests
+user_agent = "websearch-pipeline/0.1"
+
+# Whether to respect robots.txt
+respect_robots = true
+
+# Maximum size of content to process (in KB)
+max_size_kb = 1024
+
+[analyzer]
+# Backend to use for embeddings ("onnx" or "candle")
+backend = "onnx"
+
+# Model ID for embeddings
+embedding_model_id = "bge-small-en"
+
+# MMR lambda parameter (0.0 = centroid only, 1.0 = diversity only)
+mmr_lambda = 0.5
+
+# Number of top segments to select
+top_n = 10
+
+# Whether to use reranking
+rerank = false
+
+# Model ID for reranking (if enabled)
+reranker_model_id = ""
+
+[summarizer]
+# Base URL for the LLM API
+base_url = "https://api.openai.com/v1"
+
+# Model to use for summarization
+model = "gpt-3.5-turbo"
+
+# Timeout for API requests (in milliseconds)
+timeout_ms = 30000
+
+# Whether to use map-reduce for large documents
+map_reduce = false
+
+[cache]
+# Path to the cache directory
+path = "./cache"
+
+# Time-to-live for cache entries (in days)
+ttl_days = 7
