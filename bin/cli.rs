@@ -55,8 +55,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(data) => {
                     // Generate embedding/summary if requested
                     if *embed {
-                        println!("Generating embedding...");
-                        match embedding::summarize_content(data.title.as_ref(), &data.text_content).await {
+                        println!("Generating summary...");
+                        match embedding::summarize_content(data.title.as_ref().map(|s| s.as_str()), &data.text_content).await {
                             Ok(summary) => {
                                 println!("Content Summary:");
                                 println!("{}", summary);
@@ -65,31 +65,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 eprintln!("Error generating summary: {}", e);
                             }
                         }
-                    }
-                    
-                    // Format output as requested
-                    match format.as_str() {
-                        "json" => {
-                            println!("{}", to_string_pretty(&data)?);
-                        }
-                        "text" => {
-                            println!("Title: {:?}", data.title);
-                            println!("Headings: {:?}", data.headings);
-                            println!("Number of links: {}", data.links.len());
-                            println!(
-                                "Text content preview: {}",
-                                if data.text_content.len() > 200 {
-                                    format!("{}...", &data.text_content[..200])
-                                } else {
-                                    data.text_content.clone()
-                                }
-                            );
-                        }
-                        "markdown" => {
-                            println!("{}", format_as_markdown(&data));
-                        }
-                        "readable" | _ => {
-                            println!("{}", format_as_text(&data));
+                    } else {
+                        // Format output as requested
+                        match format.as_str() {
+                            "json" => {
+                                println!("{}", to_string_pretty(&data)?);
+                            }
+                            "text" => {
+                                println!("Title: {:?}", data.title);
+                                println!("Headings: {:?}", data.headings);
+                                println!("Number of links: {}", data.links.len());
+                                println!(
+                                    "Text content preview: {}",
+                                    if data.text_content.len() > 200 {
+                                        format!("{}...", &data.text_content[..200])
+                                    } else {
+                                        data.text_content.clone()
+                                    }
+                                );
+                            }
+                            "markdown" => {
+                                println!("{}", format_as_markdown(&data));
+                            }
+                            "readable" | _ => {
+                                println!("{}", format_as_text(&data));
+                            }
                         }
                     }
                 },
@@ -203,7 +203,7 @@ async fn start_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
         (StatusCode, Json<rust_websearch_mcp::ErrorResponse>),
     > {
         match embedding::summarize_content(
-            payload.title.as_ref(), 
+            payload.title.as_ref().map(|s| s.as_str()), 
             &payload.content
         ).await {
             Ok(summary) => Ok(Json(SummaryResponse { summary })),
