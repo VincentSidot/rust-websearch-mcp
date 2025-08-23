@@ -89,10 +89,15 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
 
 ## 2) Analyzer Crate (ONNX first target)
 
-- [ ] **Inference backend (Phase 1 = ONNX):**
-  - Integrate **ONNX Runtime** via `ort` crate as the default backend.
-  - Tokenization via `tokenizers` aligned with chosen models.
-  - Backend abstraction (`EmbeddingBackend`, `RerankBackend`) to allow future Candle plug-in.
+- [x] **Inference backend (Phase 1 = ONNX): model acquisition & configuration**
+  - [x] Extend analyzer config to support either HF Hub (`repo_id`, **`revision` (commit SHA required)**, `files`) or local (`model_dir`)
+  - [x] Add boolean/env flag to permit network downloads
+  - [x] Implement HF Hub integration with absolute file path resolution
+  - [x] Implement local model integration
+  - [x] Enforce pinned revision (commit SHA) for HF download mode
+  - [x] Create and expose `model_fingerprint` for inclusion in outputs/metrics
+  - [x] Adjust analyzer init to load ONNX session and tokenizer from resolved file paths
+  - [x] Document default model choice and configuration options
 
 - [ ] **Embeddings (ONNX):**
   - Default model: **`bge-small-en`** (fast, good quality).  
@@ -128,6 +133,19 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
 > **Phase 2 (optional):** Add a **Candle** backend behind a feature flag:
 > - `features = ["backend-candle"]` vs default `["backend-onnx"]`.
 > - Same `EmbeddingBackend`/`RerankBackend` trait to avoid touching callers.
+
+### Progress Log
+
+- **2025-08-23**: Step 2A.1: Analyzer — model fetch via HF Hub + local fallback (pinned revision)
+  - Implemented model artifact resolution in `crates/analyzer` so the embedding model files are obtained either from the Hugging Face Hub (pinned by commit SHA) or from a local directory
+  - Extended analyzer config to support both HF Hub and local model configurations
+  - Added a boolean/env flag to permit network downloads
+  - Implemented HF Hub integration that resolves and downloads listed files to the local HF cache on first use
+  - Implemented local model integration that uses existing files from a specified directory
+  - Enforced pinned revision (commit SHA) for HF download mode
+  - Created and exposed a `model_fingerprint` for inclusion in outputs/metrics
+  - Adjusted analyzer init to load ONNX session and tokenizer from the resolved file paths (stub implementation)
+  - Documented default model choice and configuration options
 
 ---
 
