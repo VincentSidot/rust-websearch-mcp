@@ -1,7 +1,8 @@
 use clap::{Parser, Subcommand};
-use core::Document;
+use core::{AnalyzeResponse, Document};
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
+use tokio;
 
 /// CLI for the websearch pipeline
 #[derive(Parser)]
@@ -46,8 +47,25 @@ enum Commands {
     },
     /// Summarize analyzed content
     Summarize {
-        /// Path to the analyzed document
-        path: String,
+        /// Path to the analyzed document (AnalyzeResponse JSON)
+        #[clap(long)]
+        analysis: String,
+
+        /// Path to the original document (Document JSON)
+        #[clap(long)]
+        document: String,
+
+        /// Style of summary to generate
+        #[clap(long, default_value = "abstract_with_bullets")]
+        style: String,
+
+        /// Timeout for API requests (in milliseconds)
+        #[clap(long, default_value = "30000")]
+        timeout_ms: u64,
+
+        /// Temperature for sampling
+        #[clap(long, default_value = "0.2")]
+        temperature: f32,
     },
     /// Run the full pipeline
     Run {
@@ -56,7 +74,9 @@ enum Commands {
     },
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
     let cli = Cli::parse();
 
     match &cli.command {
@@ -81,9 +101,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 output.as_deref(),
             )?;
         }
-        Commands::Summarize { path } => {
-            println!("Summarizing document: {}", path);
-            // TODO: Implement summarization
+        Commands::Summarize {
+            analysis,
+            document,
+            style,
+            timeout_ms,
+            temperature,
+        } => {
+            summarize_document(
+                analysis,
+                document,
+                style,
+                *timeout_ms,
+                *temperature,
+            ).await?;
         }
         Commands::Run { url } => {
             println!("Running full pipeline for URL: {}", url);
@@ -159,5 +190,78 @@ fn analyze_document(
     }
 
     println!("Analysis complete");
+    Ok(())
+}
+
+async fn summarize_document(
+    analysis_path: &str,
+    document_path: &str,
+    style: &str,
+    timeout_ms: u64,
+    temperature: f32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Summarizing document");
+    println!("Analysis path: {}", analysis_path);
+    println!("Document path: {}", document_path);
+
+    // Load document
+    let file = File::open(document_path)?;
+    let reader = BufReader::new(file);
+    let document: Document = serde_json::from_reader(reader)?;
+
+    // Load analysis
+    let file = File::open(analysis_path)?;
+    let reader = BufReader::new(file);
+    let analysis: AnalyzeResponse = serde_json::from_reader(reader)?;
+
+    // Validate that the analysis matches the document
+    if analysis.doc_id != document.doc_id {
+        return Err("Document ID mismatch between document and analysis".into());
+    }
+
+    // Create summarizer configuration
+    let style_enum = match style {
+        "abstract_with_bullets" => summarizer::config::SummaryStyle::AbstractWithBullets,
+        "tldr" => summarizer::config::SummaryStyle::TlDr,
+        "extractive" => summarizer::config::SummaryStyle::Extractive,
+        _ => summarizer::config::SummaryStyle::AbstractWithBullets, // Default
+    };
+
+    let config = summarizer::config::SummarizerConfig {
+        base_url: std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
+        model: std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-3.5-turbo".to_string()),
+        timeout_ms,
+        temperature,
+        max_tokens: None, // Not configurable via CLI in this MVP
+        style: style_enum,
+        api_key: std::env::var("OPENAI_API_KEY").ok(),
+    };
+
+    // Log config info
+    println!("Model: {}", config.model);
+    println!("Timeout: {} ms", config.timeout_ms);
+    println!("Temperature: {}", config.temperature);
+    println!("Style: {:?}", config.style);
+
+    // Create summarizer
+    let summarizer = summarizer::Summarizer::new(config)?;
+
+    // Log number of selected segments
+    println!("Selected segments: {}", analysis.top_segments.len());
+
+    // Record start time
+    let start_time = std::time::Instant::now();
+
+    // Summarize document
+    let response = summarizer.summarize(&document, &analysis).await?;
+
+    // Record end time
+    let duration = start_time.elapsed();
+    println!("Document summarization completed in {:?}", duration);
+
+    // Write output to stdout
+    serde_json::to_writer_pretty(std::io::stdout(), &response)?;
+
+    println!("Summarization complete");
     Ok(())
 }

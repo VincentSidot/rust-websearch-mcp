@@ -183,10 +183,10 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
 
 ## 3) Summarizer Crate
 
-- [ ] Summarization via an **OpenAI-compatible API** (LM Studio/Ollama/remote).
-- [ ] Configurable: base URL, API key (env), model id, style (abstract/bullets/TL;DR), timeouts.
+- [x] Summarization via an **OpenAI-compatible API** (LM Studio/Ollama/remote).
+- [x] Configurable: base URL, API key (env), model id, style (abstract/bullets/TL;DR), timeouts.
 - [ ] **Map-reduce** mode for large docs (chunk summaries → merge).
-- [ ] Extractive fallback when API errors/timeout (stitch top sentences).
+- [x] Extractive fallback when API errors/timeout (stitch top sentences).
 
 **Crates**: `reqwest`, `tokio`, `serde_json`, optional `retry`/`backoff`
 
@@ -194,6 +194,19 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
 - Mock HTTP endpoint for deterministic CI.
 - Snapshot: fixed `AnalyzeResponse` + canned LLM reply → expected `SummarizeResponse`.
 - Timeout tests trigger extractive fallback.
+
+### Progress Log
+
+- **2025-08-24**: Step 3A: Summarizer MVP — OpenAI-compatible call + guarded prompt + CLI + fallback
+  - Implemented minimal summarizer crate that accepts a `Document` and an `AnalyzeResponse`
+  - Builds a guarded summarization request using the chosen selected segments (ordered)
+  - Calls an OpenAI-compatible endpoint to produce a concise summary
+  - Returns a `SummarizeResponse` JSON with graceful extractive fallback on API failure/timeout
+  - Added configuration surface with support for `base_url`, `model`, `timeout_ms`, `temperature`, `max_tokens`, and `style`
+  - Integrated with CLI with subcommand `summarize` that accepts `--analysis`, `--document`, `--style`, `--timeout-ms`, and `--temperature`
+  - Added unit tests for core functionality including mock API tests and timeout tests
+  - Verified that the workspace builds successfully and all tests pass
+  - Performance note: API calls take variable time depending on the LLM service; fallback is nearly instantaneous
 
 ---
 

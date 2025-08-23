@@ -1,0 +1,24 @@
+{
+  "doc_id": "example-doc-123",
+  "model_fingerprint": "model456",
+  "top_segments": [
+    {
+      "segment_id": "seg-1",
+      "score_representative": 0.95,
+      "score_diversity": 0.85,
+      "reason": "Highly central"
+    },
+    {
+      "segment_id": "seg-3",
+      "score_representative": 0.85,
+      "score_diversity": 0.75,
+      "reason": "Diverse content"
+    }
+  ],
+  "metrics": {
+    "num_segments": 4,
+    "top_n": 2,
+    "mmr_lambda": 0.65,
+    "avg_pairwise_cosine": 0.3
+  }
+}
