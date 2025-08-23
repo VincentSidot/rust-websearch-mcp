@@ -1,0 +1,19 @@
+{
+  "doc_id": "doc123",
+  "model_fingerprint": "model456",
+  "top_segments": [
+    {
+      "segment_id": "seg123",
+      "score": 0.95,
+      "reason": "High relevance"
+    }
+  ],
+  "coverage": {
+    "total_segments": 10,
+    "analyzed_segments": 8
+  },
+  "cache_info": {
+    "hit": false,
+    "key": null
+  }
+}

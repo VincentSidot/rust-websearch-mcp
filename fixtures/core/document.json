@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "doc_id": "doc123",
+  "url": "https://example.com",
+  "title": "Example",
+  "lang": "en",
+  "fetched_at": "2023-01-01T00:00:00Z",
+  "segments": [
+    {
+      "segment_id": "seg123",
+      "text": "This is a segment",
+      "path": "body > p",
+      "position": 0
+    }
+  ],
+  "hints": {
+    "hint1": "value1"
+  }
+}

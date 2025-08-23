@@ -1,0 +1,23 @@
+{
+  "summary_text": "This is a summary",
+  "bullets": [
+    "Bullet 1",
+    "Bullet 2"
+  ],
+  "citations": [
+    {
+      "segment_id": "seg123",
+      "start": 0,
+      "end": 4
+    }
+  ],
+  "guardrails": {
+    "filtered": true,
+    "reason": "Contains sensitive content"
+  },
+  "metrics": {
+    "processing_time_ms": 100,
+    "input_tokens": 1000,
+    "output_tokens": 100
+  }
+}

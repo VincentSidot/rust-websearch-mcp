@@ -50,19 +50,40 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
 
 ## 1) Core Types & Contracts
 
-- [ ] Move schemas into `crates/core`:
+- [x] Move schemas into `crates/core`:
   - `Document` (id, url, title, lang, segments).
   - `Segment` (id, text, path, position).
   - `AnalyzeResponse` (selected segments, scores, coverage).
   - `SummarizeResponse` (summary_text, bullets, citations, metrics).
-- [ ] Provide JSON + MessagePack serialization.
-- [ ] Export `SCHEMA_VERSION` and maintain a small changelog.
+- [x] Provide JSON + MessagePack serialization.
+- [x] Export `SCHEMA_VERSION` and maintain a small changelog.
 
 **Crates**: `serde`, `serde_json`, `rmp-serde`
 
 **Test policy**
 - Snapshot round-trips for all core types.
 - `serde` tests: serialize → deserialize is identical.
+
+### Progress Log
+
+- **2025-08-23**: M1: Workspace scaffolding (move scraper → crates/websearch)
+  - Restructured repository into a Cargo workspace with four crates: `core`, `websearch`, `analyzer`, and `summarizer`
+  - Moved the existing scraper code to `crates/websearch` and updated all references
+  - Created empty stub crates for `core`, `analyzer`, and `summarizer`
+  - Created a new `cli` crate as the orchestrator entry point
+  - Added top-level configuration files (`config.example.toml`, `.env.example`, `README.md`)
+  - Added fixture directories for future testing
+  - Verified that `cargo build` succeeds at the workspace root
+
+- **2025-08-23**: Step 1: Core Types & Contracts (add shared schemas + serde)
+  - Implemented core schema types (`Document`, `Segment`, `AnalyzeResponse`, `SummarizeResponse`) in `crates/core`
+  - Added JSON and MessagePack serialization for all types using `serde`, `serde_json`, and `rmp-serde`
+  - Defined `SCHEMA_VERSION` constant and added a schema changelog in `crates/core`
+  - Implemented ID helper functions for `doc_id` and `segment_id` using `blake3`
+  - Added placeholder structs for `Error` and `Config` in `crates/core`
+  - Added unit tests for serde round-trips and ID computation
+  - Generated snapshot files for example payloads and stored them under `fixtures/core/`
+  - Verified that the workspace builds successfully and all tests pass
 
 ---
 
@@ -210,90 +231,6 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
 - `cli config print` shows effective config (secrets redacted).
 
 ---
-
-## Reference: Workspace File Tree (example)
-
-```text
-.
-├─ Cargo.toml
-├─ README.md
-├─ TODO.md
-├─ config/
-│  ├─ config.example.toml
-│  └─ config.local.toml            # gitignored
-├─ .env.example
-├─ fixtures/
-│  ├─ html/
-│  ├─ documents/
-│  ├─ analyze/
-│  └─ summarize/
-├─ bin/
-│  └─ cli.rs                       # orchestrator CLI (scrape/analyze/summarize/run)
-└─ crates/
-   ├─ core/
-   │  ├─ Cargo.toml
-   │  └─ src/
-   │     ├─ lib.rs
-   │     ├─ schema.rs              # Document, Segment, Analyze/Summarize Requests & Responses
-   │     ├─ ids.rs                 # blake3 ids
-   │     ├─ config.rs
-   │     └─ errors.rs
-   │  └─ tests/
-   │     └─ serde_roundtrip.rs
-   │
-   ├─ websearch/                   # existing scraper moved here
-   │  ├─ Cargo.toml
-   │  ├─ src/
-   │  │  ├─ lib.rs
-   │  │  ├─ fetch.rs
-   │  │  ├─ parse.rs
-   │  │  ├─ segment.rs
-   │  │  └─ lang.rs
-   │  ├─ bin/
-   │  │  └─ websearch.rs
-   │  └─ tests/
-   │     ├─ scrape_golden.rs
-   │     └─ segmentation_props.rs
-   │
-   ├─ analyzer/
-   │  ├─ Cargo.toml
-   │  ├─ src/
-   │  │  ├─ lib.rs
-   │  │  ├─ embed/
-   │  │  │  ├─ mod.rs
-   │  │  │  ├─ onnx_backend.rs     # Phase 1: ONNX Runtime via `ort` (default)
-   │  │  │  └─ candle_backend.rs   # Phase 2: optional feature-gated backend
-   │  │  ├─ rank/
-   │  │  │  ├─ centroid.rs
-   │  │  │  ├─ mmr.rs
-   │  │  │  └─ metrics.rs          # redundancy/coverage metrics
-   │  │  ├─ rerank/
-   │  │  │  ├─ mod.rs
-   │  │  │  └─ cross_encoder.rs    # ONNX reranker (optional)
-   │  │  ├─ cache.rs               # sled/file cache
-   │  │  └─ model_id.rs            # fingerprints (embedding + reranker)
-   │  ├─ bin/
-   │  │  └─ analyzer.rs            # reads Document JSON → writes AnalyzeResponse JSON
-   │  ├─ benches/
-   │  │  └─ analyzer_perf.rs
-   │  └─ tests/
-   │     ├─ math_unit.rs
-   │     └─ analyze_snapshot.rs
-   │
-   └─ summarizer/
-      ├─ Cargo.toml
-      ├─ src/
-      │  ├─ lib.rs
-      │  ├─ client.rs              # OpenAI-compatible HTTP client
-      │  ├─ prompt.rs              # abstract/bullets/TL;DR, guardrails
-      │  ├─ reduce.rs              # map-reduce logic (optional)
-      │  └─ fallback.rs            # extractive fallback on timeout
-      ├─ bin/
-      │  └─ summarizer.rs          # reads AnalyzeResponse JSON → writes SummarizeResponse JSON
-      └─ tests/
-         ├─ mock_api.rs
-         └─ summarize_snapshot.rs
-```
 
 ## Notes
 
