@@ -23,3 +23,11 @@ logger = ["dep:colored"]
 [[bin]]
 name = "rust-websearch-mcp"
 path = "bin/cli.rs"
+
+[[example]]
+name = "simple-embedding"
+path = "examples/simple_embedding.rs"
+
+[[example]]
+name = "test-openai"
+path = "examples/test_openai.rs"

@@ -69,7 +69,7 @@ mod logger_inner {
     }
 
     pub fn init_logger() {
-        static LOGGER: OnceLock<Logger> = OnceLock::new();;
+        static LOGGER: OnceLock<Logger> = OnceLock::new();
 
         log::set_logger(LOGGER.get_or_init(|| {
             let config = get_config();

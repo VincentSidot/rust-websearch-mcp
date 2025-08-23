@@ -6,6 +6,7 @@ use std::error::Error;
 pub mod config;
 pub mod formatter;
 pub mod logger;
+pub mod embedding;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ScrapeRequest {
