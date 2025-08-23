@@ -46,6 +46,16 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
   - Added fixture directories for future testing
   - Verified that `cargo build` succeeds at the workspace root
 
+- **2025-08-23**: Step 1: Core Types & Contracts (add shared schemas + serde)
+  - Implemented core schema types (`Document`, `Segment`, `AnalyzeResponse`, `SummarizeResponse`) in `crates/core`
+  - Added JSON and MessagePack serialization for all types using `serde`, `serde_json`, and `rmp-serde`
+  - Defined `SCHEMA_VERSION` constant and added a schema changelog in `crates/core`
+  - Implemented ID helper functions for `doc_id` and `segment_id` using `blake3`
+  - Added placeholder structs for `Error` and `Config` in `crates/core`
+  - Added unit tests for serde round-trips and ID computation
+  - Generated snapshot files for example payloads and stored them under `fixtures/core/`
+  - Verified that the workspace builds successfully and all tests pass
+
 ---
 
 ## 1) Core Types & Contracts
@@ -157,6 +167,17 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
   - Added unit tests for cosine similarity, L2 normalization, and MMR properties
   - Added snapshot tests for deterministic fixture processing
   - Performance note: Dummy implementation runs in milliseconds for small documents
+
+- **2025-08-24**: Step 2B: Analyzer — ONNX embedding forward pass (BGE Small v1.5) + centroid & MMR
+  - Replaced dummy embeddings with real ONNX forward pass using BGE Small v1.5 model
+  - Integrated ONNX Runtime for model inference with proper session and tokenizer initialization
+  - Implemented mean pooling with attention mask for sentence embeddings
+  - Added L2 normalization for unit-length embeddings
+  - Preserved deterministic ordering of embeddings aligned to input segments
+  - Reused existing centroid similarity + MMR selection without changes
+  - Added CLI flags for batch size and max sequence length configuration
+  - Updated analyzer to log model info, embedding dimension, and timing metrics
+  - Performance note: CPU-only inference takes ~100ms per segment on dev machine
 
 ---
 

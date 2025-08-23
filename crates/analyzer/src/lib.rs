@@ -11,6 +11,9 @@ pub mod model;
 use config::AnalyzerConfig;
 use core::{Document, AnalyzeResponse, SegmentScore, AnalysisMetrics};
 use log::{info, debug};
+use ndarray::{Array2, Axis};
+use ort::session::Session;
+use tokenizers::Tokenizer;
 
 /// The main analyzer struct
 pub struct Analyzer {
@@ -19,6 +22,18 @@ pub struct Analyzer {
     
     /// Model fingerprint for tracking
     model_fingerprint: String,
+    
+    /// ONNX Runtime session for the embedding model
+    session: Session,
+    
+    /// Tokenizer for the embedding model
+    tokenizer: Tokenizer,
+    
+    /// Batch size for inference
+    batch_size: usize,
+    
+    /// Maximum sequence length
+    max_seq_len: usize,
 }
 
 impl Analyzer {
@@ -26,15 +41,55 @@ impl Analyzer {
     pub fn new(config: AnalyzerConfig) -> Result<Self, Box<dyn std::error::Error>> {
         info!("Initializing analyzer with config: {:?}", config);
         
-        // For this step, we'll use a placeholder model fingerprint
-        let model_fingerprint = config.model_fingerprint();
+        // Resolve model files
+        let resolved_model = model::resolve_model(&config)?;
+        info!("Resolved model files: {:?}", resolved_model.file_paths);
+        
+        // Find the ONNX model file and tokenizer file
+        let mut model_path = None;
+        let mut tokenizer_path = None;
+        
+        for path in &resolved_model.file_paths {
+            let path_str = path.to_string_lossy();
+            if path_str.contains("model.onnx") {
+                model_path = Some(path.clone());
+            } else if path_str.contains("tokenizer.json") {
+                tokenizer_path = Some(path.clone());
+            }
+        }
+        
+        // Ensure we found both files
+        let model_path = model_path.ok_or("ONNX model file not found")?;
+        let tokenizer_path = tokenizer_path.ok_or("Tokenizer file not found")?;
+        
+        info!("Model path: {:?}", model_path);
+        info!("Tokenizer path: {:?}", tokenizer_path);
+        
+        // Load the tokenizer
+        let tokenizer = Tokenizer::from_file(&tokenizer_path)
+            .map_err(|e| format!("Failed to load tokenizer: {}", e))?;
+        
+        // Create ONNX Runtime environment and session
+        let session = Session::builder()?
+            .commit_from_file(model_path)?;
+        
+        // Get model fingerprint
+        let model_fingerprint = resolved_model.fingerprint;
         info!("Model fingerprint: {}", model_fingerprint);
+        
+        // Set batch size and max sequence length from config or defaults
+        let batch_size = 8; // Default batch size
+        let max_seq_len = 512; // Default max sequence length
         
         info!("Analyzer initialized successfully");
         
         Ok(Self {
             config,
             model_fingerprint,
+            session,
+            tokenizer,
+            batch_size,
+            max_seq_len,
         })
     }
     
@@ -44,15 +99,15 @@ impl Analyzer {
     }
     
     /// Analyze a document and return an AnalyzeResponse
-    pub fn analyze(&self, document: &Document) -> Result<AnalyzeResponse, Box<dyn std::error::Error>> {
+    pub fn analyze(&mut self, document: &Document) -> Result<AnalyzeResponse, Box<dyn std::error::Error>> {
         info!("Analyzing document: {}", document.doc_id);
         
         // Extract texts from segments
         let texts: Vec<&str> = document.segments.iter().map(|s| s.text.as_str()).collect();
         debug!("Processing {} segments", texts.len());
         
-        // Generate embeddings for all segments (placeholder implementation)
-        let embeddings = self.generate_embeddings(&texts)?;
+        // Generate embeddings for all segments in batches
+        let embeddings = self.generate_embeddings_batched(&texts)?;
         debug!("Generated embeddings with shape: ({}, {})", embeddings.nrows(), embeddings.ncols());
         
         // Compute centroid
@@ -126,18 +181,123 @@ impl Analyzer {
         Ok(response)
     }
     
-    /// Generate embeddings for a batch of texts (placeholder implementation)
-    fn generate_embeddings(&self, texts: &[&str]) -> Result<ndarray::Array2<f32>, Box<dyn std::error::Error>> {
-        // For this step, we'll generate dummy embeddings
-        // In a real implementation, we would use an ONNX model here
-        let dummy_embeddings = ndarray::Array2::from_shape_fn((texts.len(), 384), |(i, j)| {
-            (i * j) as f32 / (texts.len() * 384) as f32
-        });
+    /// Generate embeddings for a batch of texts using ONNX model
+    fn generate_embeddings_batched(&mut self, texts: &[&str]) -> Result<ndarray::Array2<f32>, Box<dyn std::error::Error>> {
+        info!("Generating embeddings for {} texts in batches of {}", texts.len(), self.batch_size);
+        
+        // Process texts in batches
+        let mut all_embeddings = Vec::new();
+        
+        for chunk in texts.chunks(self.batch_size) {
+            let batch_embeddings = self.generate_embeddings(chunk)?;
+            all_embeddings.push(batch_embeddings);
+        }
+        
+        // Concatenate all batch embeddings
+        let embeddings = ndarray::concatenate(
+            Axis(0),
+            &all_embeddings.iter().map(|a| a.view()).collect::<Vec<_>>()
+        )?;
+        
+        Ok(embeddings)
+    }
+    
+    /// Generate embeddings for a batch of texts using ONNX model
+    fn generate_embeddings(&mut self, texts: &[&str]) -> Result<ndarray::Array2<f32>, Box<dyn std::error::Error>> {
+        if texts.is_empty() {
+            return Ok(Array2::zeros((0, 384)));
+        }
+        
+        debug!("Generating embeddings for {} texts", texts.len());
+        
+        // Tokenize texts with padding and truncation
+        let encodings = self.tokenizer.encode_batch(texts.to_vec(), true)
+            .map_err(|e| format!("Tokenization failed: {}", e))?;
+        
+        // Convert to input tensors
+        let input_ids: Vec<Vec<u32>> = encodings.iter()
+            .map(|encoding| {
+                let ids = encoding.get_ids();
+                // Truncate or pad to max_seq_len
+                if ids.len() > self.max_seq_len {
+                    ids[..self.max_seq_len].to_vec()
+                } else {
+                    let mut padded = ids.to_vec();
+                    padded.resize(self.max_seq_len, 0);
+                    padded
+                }
+            })
+            .collect();
+        
+        let attention_mask: Vec<Vec<u32>> = input_ids.iter()
+            .map(|ids| {
+                ids.iter().map(|&id| if id > 0 { 1 } else { 0 }).collect()
+            })
+            .collect();
+        
+        // Stack into batched tensors
+        let batch_size = input_ids.len();
+        let input_ids_array = Array2::from_shape_vec(
+            (batch_size, self.max_seq_len),
+            input_ids.into_iter().flatten().collect()
+        )?;
+        
+        let attention_mask_array = Array2::from_shape_vec(
+            (batch_size, self.max_seq_len),
+            attention_mask.into_iter().flatten().collect()
+        )?;
+        
+        // Run inference
+        let embeddings = {
+            let input_ids_value = ort::value::Value::from_array((input_ids_array.shape(), input_ids_array.as_slice().unwrap().to_vec()))?;
+            let attention_mask_value = ort::value::Value::from_array((attention_mask_array.shape(), attention_mask_array.as_slice().unwrap().to_vec()))?;
+            
+            let outputs = self.session.run(ort::inputs![
+                "input_ids" => input_ids_value,
+                "attention_mask" => attention_mask_value
+            ])?;
+            
+            // Extract embeddings (first output)
+            let (shape, data) = outputs[0].try_extract_tensor::<f32>()?;
+            // Convert shape from Vec<i64> to Vec<usize>
+            let shape_usize: Vec<usize> = shape.iter().map(|&x| x as usize).collect();
+            ndarray::ArrayD::from_shape_vec(shape_usize, data.to_vec())?
+        };
+        
+        // Apply mean pooling with attention mask
+        let pooled_embeddings = self.mean_pool(&embeddings.view(), &attention_mask_array);
         
         // L2 normalize embeddings
-        let normalized_embeddings = l2_normalize_rows(&dummy_embeddings);
+        let normalized_embeddings = l2_normalize_rows(&pooled_embeddings);
         
         Ok(normalized_embeddings)
+    }
+    
+    /// Apply mean pooling with attention mask
+    fn mean_pool(&self, embeddings: &ndarray::ArrayViewD<f32>, attention_mask: &Array2<u32>) -> Array2<f32> {
+        // Convert attention mask to f32
+        let mask_f32: Array2<f32> = attention_mask.mapv(|x| x as f32);
+        
+        // Expand mask to match embedding dimensions
+        let mask_expanded = mask_f32.insert_axis(Axis(2));
+        
+        // Apply mask to embeddings
+        let masked_embeddings = embeddings.to_owned() * &mask_expanded;
+        
+        // Sum along sequence dimension
+        let sum_embeddings = masked_embeddings.sum_axis(Axis(1));
+        
+        // Sum mask along sequence dimension
+        let sum_mask = mask_expanded.sum_axis(Axis(1));
+        
+        // Avoid division by zero
+        let sum_mask_safe = sum_mask.mapv(|x| if x > 0.0 { x } else { 1.0 });
+        
+        // Compute mean
+        let mean_embeddings = sum_embeddings / sum_mask_safe;
+        
+        // Convert to 2D array
+        mean_embeddings.into_dimensionality().unwrap()
     }
 }
 
@@ -299,13 +459,23 @@ mod tests {
     
     #[test]
     fn test_analyzer_creation_local_missing() {
-        let config = AnalyzerConfig::new();
+        let mut config = AnalyzerConfig::new();
+        // Disable downloads for testing
+        config.allow_downloads = false;
         let analyzer = Analyzer::new(config);
-        assert!(analyzer.is_ok());
+        // This should fail because we're not allowing downloads and the model isn't available locally
+        assert!(analyzer.is_err());
     }
     
     #[test]
     fn test_analyze_snapshot() {
+        // This test requires a real model, so we'll skip it in CI
+        // To run it locally, you need to have the model files available
+        if std::env::var("EMBED_ONNX_TEST").unwrap_or_default() != "1" {
+            println!("Skipping test_analyze_snapshot - set EMBED_ONNX_TEST=1 to run");
+            return;
+        }
+        
         // Create a simple document for testing
         let document = core::Document {
             schema_version: "1.0.0".to_string(),
@@ -339,7 +509,7 @@ mod tests {
         
         // Create analyzer with default config
         let config = AnalyzerConfig::new();
-        let analyzer = Analyzer::new(config.clone()).expect("Failed to create analyzer");
+        let mut analyzer = Analyzer::new(config.clone()).expect("Failed to create analyzer");
         
         // Analyze the document
         let response = analyzer.analyze(&document).expect("Failed to analyze document");

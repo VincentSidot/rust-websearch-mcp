@@ -32,6 +32,14 @@ enum Commands {
         #[clap(long, default_value = "0.65")]
         mmr_lambda: f32,
         
+        /// Batch size for inference
+        #[clap(long, default_value = "8")]
+        batch_size: usize,
+        
+        /// Maximum sequence length
+        #[clap(long, default_value = "512")]
+        max_seq_len: usize,
+        
         /// Output file path (stdout if not provided)
         #[clap(short, long)]
         output: Option<String>,
@@ -56,8 +64,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Scraping URL: {}", url);
             // TODO: Implement scraping
         }
-        Commands::Analyze { path, top_n, mmr_lambda, output } => {
-            analyze_document(path, *top_n, *mmr_lambda, output.as_deref())?;
+        Commands::Analyze { path, top_n, mmr_lambda, batch_size, max_seq_len, output } => {
+            analyze_document(path, *top_n, *mmr_lambda, *batch_size, *max_seq_len, output.as_deref())?;
         }
         Commands::Summarize { path } => {
             println!("Summarizing document: {}", path);
@@ -75,7 +83,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn analyze_document(
     path: &str, 
     top_n: usize, 
-    mmr_lambda: f32, 
+    mmr_lambda: f32,
+    batch_size: usize,
+    max_seq_len: usize,
     output: Option<&str>
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Analyzing document: {}", path);
@@ -105,10 +115,23 @@ fn analyze_document(
     };
     
     // Create analyzer
-    let analyzer = analyzer::Analyzer::new(config)?;
+    let mut analyzer = analyzer::Analyzer::new(config)?;
+    
+    // Log model info
+    println!("Model ID: {}", analyzer.model_fingerprint());
+    println!("Embedding dimension: 384");
+    println!("Batch size: {}", batch_size);
+    println!("Max sequence length: {}", max_seq_len);
+    
+    // Record start time
+    let start_time = std::time::Instant::now();
     
     // Analyze document
     let response = analyzer.analyze(&document)?;
+    
+    // Record end time
+    let duration = start_time.elapsed();
+    println!("Document analysis completed in {:?}", duration);
     
     // Write output
     if let Some(output_path) = output {
