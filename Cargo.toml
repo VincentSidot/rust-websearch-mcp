@@ -13,8 +13,13 @@ axum = "0.8.4"
 tower-http = { version = "0.6.6", features = ["cors"] }
 clap = { version = "4.0", features = ["derive"] }
 log = "0.4"
-env_logger = { version = "0.11.8", optional = true }
+colored = { version = "3.0.0", optional = true }
+dotenvy = "0.15.7"
 
 [features]
-default = []
-logger = ["env_logger"]
+default = ["logger"]
+logger = ["dep:colored"]
+
+[[bin]]
+name = "rust-websearch-mcp"
+path = "bin/cli.rs"

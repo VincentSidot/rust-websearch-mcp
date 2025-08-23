@@ -3,6 +3,8 @@ use rust_websearch_mcp::formatter::{format_as_markdown, format_as_text};
 use rust_websearch_mcp::logger;
 use rust_websearch_mcp::scrape_webpage;
 use serde_json::to_string_pretty;
+use std::net::SocketAddr;
+use std::process;
 
 #[derive(Parser)]
 #[clap(name = "Web Scraper CLI")]
@@ -70,9 +72,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 },
                 Err(e) => {
-                    log::error!("Error scraping webpage: {}", e);
                     eprintln!("Error scraping webpage: {}", e);
-                    std::process::exit(1);
+                    process::exit(1);
                 }
             }
         }
@@ -92,8 +93,8 @@ async fn start_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
         response::Json,
         routing::{get, post},
     };
+    use log::error;
     use serde::{Deserialize, Serialize};
-    use std::net::SocketAddr;
     use tower_http::cors::CorsLayer;
 
     #[derive(Serialize, Deserialize, Debug)]
@@ -121,7 +122,7 @@ async fn start_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
         match rust_websearch_mcp::scrape_webpage(&payload.url).await {
             Ok(data) => Ok(Json(data)),
             Err(e) => {
-                log::error!("Error scraping webpage: {}", e);
+                error!("Error scraping webpage: {}", e);
                 Err((
                     StatusCode::BAD_REQUEST,
                     Json(rust_websearch_mcp::ErrorResponse {
@@ -143,10 +144,7 @@ async fn start_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     println!("Web Scraper API listening on http://{}", addr);
     println!("Press Ctrl+C to stop the server");
 
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    axum::serve(tokio::net::TcpListener::bind(addr).await?, app).await?;
 
     Ok(())
 }
