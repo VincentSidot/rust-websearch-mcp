@@ -36,6 +36,9 @@ path-slash = "0.2"
 # Error handling
 thiserror = "1.0"
 
+# Numerical computing
+ndarray = "0.15"
+
 [dev-dependencies]
 # Testing utilities
 tempfile = "3.0"

@@ -49,10 +49,8 @@ pub struct AnalyzeResponse {
     pub model_fingerprint: String,
     /// Top segments with scores and reasons
     pub top_segments: Vec<SegmentScore>,
-    /// Coverage information
-    pub coverage: CoverageInfo,
-    /// Cache information
-    pub cache_info: CacheInfo,
+    /// Metrics about the analysis
+    pub metrics: AnalysisMetrics,
 }
 
 /// Score and reason for a segment
@@ -60,10 +58,25 @@ pub struct AnalyzeResponse {
 pub struct SegmentScore {
     /// Segment ID
     pub segment_id: String,
-    /// Score assigned by the model
-    pub score: f32,
-    /// Reason for the score
+    /// Score for representativeness (centroid cosine similarity)
+    pub score_representative: f32,
+    /// Score for diversity (MMR term)
+    pub score_diversity: f32,
+    /// Reason for selection
     pub reason: String,
+}
+
+/// Metrics about the analysis
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AnalysisMetrics {
+    /// Total number of segments
+    pub num_segments: usize,
+    /// Number of top segments selected
+    pub top_n: usize,
+    /// MMR lambda parameter used
+    pub mmr_lambda: f32,
+    /// Average pairwise cosine similarity among selected segments (redundancy indicator)
+    pub avg_pairwise_cosine: f32,
 }
 
 /// Coverage information
@@ -239,16 +252,15 @@ mod tests {
             model_fingerprint: "model456".to_string(),
             top_segments: vec![SegmentScore {
                 segment_id: "seg123".to_string(),
-                score: 0.95,
-                reason: "High relevance".to_string(),
+                score_representative: 0.95,
+                score_diversity: 0.85,
+                reason: "Highly central".to_string(),
             }],
-            coverage: CoverageInfo {
-                total_segments: 10,
-                analyzed_segments: 8,
-            },
-            cache_info: CacheInfo {
-                hit: false,
-                key: None,
+            metrics: AnalysisMetrics {
+                num_segments: 10,
+                top_n: 5,
+                mmr_lambda: 0.65,
+                avg_pairwise_cosine: 0.3,
             },
         };
 
@@ -264,16 +276,15 @@ mod tests {
             model_fingerprint: "model456".to_string(),
             top_segments: vec![SegmentScore {
                 segment_id: "seg123".to_string(),
-                score: 0.95,
-                reason: "High relevance".to_string(),
+                score_representative: 0.95,
+                score_diversity: 0.85,
+                reason: "Highly central".to_string(),
             }],
-            coverage: CoverageInfo {
-                total_segments: 10,
-                analyzed_segments: 8,
-            },
-            cache_info: CacheInfo {
-                hit: false,
-                key: None,
+            metrics: AnalysisMetrics {
+                num_segments: 10,
+                top_n: 5,
+                mmr_lambda: 0.65,
+                avg_pairwise_cosine: 0.3,
             },
         };
 

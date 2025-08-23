@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0.0",
+  "doc_id": "sample-doc-123",
+  "url": "https://example.com",
+  "title": "Sample Document",
+  "lang": "en",
+  "fetched_at": "2023-01-01T00:00:00Z",
+  "segments": [
+    {
+      "segment_id": "seg-1",
+      "text": "This is the first segment of the document. It contains some introductory text.",
+      "path": "body > p:nth-child(1)",
+      "position": 0
+    },
+    {
+      "segment_id": "seg-2",
+      "text": "This is the second segment. It discusses a different topic from the first.",
+      "path": "body > p:nth-child(2)",
+      "position": 1
+    },
+    {
+      "segment_id": "seg-3",
+      "text": "The third segment continues the discussion with more detailed information.",
+      "path": "body > p:nth-child(3)",
+      "position": 2
+    },
+    {
+      "segment_id": "seg-4",
+      "text": "Here we have the fourth segment, which is related to the first topic again.",
+      "path": "body > p:nth-child(4)",
+      "position": 3
+    }
+  ],
+  "hints": null
+}

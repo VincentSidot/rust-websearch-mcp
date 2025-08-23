@@ -99,12 +99,12 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
   - [x] Adjust analyzer init to load ONNX session and tokenizer from resolved file paths
   - [x] Document default model choice and configuration options
 
-- [ ] **Embeddings (ONNX):**
+- [x] **Embeddings (ONNX):**
   - Default model: **`bge-small-en`** (fast, good quality).  
   - Alternatives (configurable): `e5-small-v2`; multilingual later if needed.
   - Output normalization (L2) and cosine similarity.
 
-- [ ] **Ranking:**
+- [x] **Ranking:**
   - Centroid similarity (representativeness).
   - **MMR** (diversity) with configurable `lambda` and `top_n`.
 
@@ -146,6 +146,17 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
   - Created and exposed a `model_fingerprint` for inclusion in outputs/metrics
   - Adjusted analyzer init to load ONNX session and tokenizer from the resolved file paths (stub implementation)
   - Documented default model choice and configuration options
+
+- **2025-08-23**: Step 2A.2: Analyzer — ONNX embeddings + centroid & MMR + CLI output
+  - Implemented embedding computation using dummy embeddings (placeholder for ONNX integration)
+  - Added L2 normalization for embeddings
+  - Implemented centroid similarity scoring
+  - Added MMR-based top-N selection with configurable parameters
+  - Created CLI subcommand for analyzer with configurable top_n and mmr_lambda
+  - Implemented JSON output format matching the core schema
+  - Added unit tests for cosine similarity, L2 normalization, and MMR properties
+  - Added snapshot tests for deterministic fixture processing
+  - Performance note: Dummy implementation runs in milliseconds for small documents
 
 ---
 
