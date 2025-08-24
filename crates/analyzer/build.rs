@@ -1,4 +1,5 @@
 // crates/analyzer/build.rs
+#[cfg(target_os = "windows")]
 use std::{env, fs, io, path::PathBuf};
 
 #[cfg(target_os = "windows")]
