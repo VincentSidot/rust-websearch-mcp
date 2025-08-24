@@ -2,6 +2,7 @@ use reqwest::Client;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
+use chrono::Utc;
 
 pub mod config;
 pub mod formatter;
@@ -35,6 +36,62 @@ pub struct ErrorResponse {
     pub error: String,
 }
 
+/// Converts scraped data to a Document
+pub fn scraped_to_document(url: &str, scraped: &ScrapeResponse) -> core::Document {
+    use core::{Document, Segment};
+    use std::collections::HashMap;
+    
+    // Get current timestamp in ISO 8601 format
+    let fetched_at = Utc::now().to_rfc3339();
+    
+    // Use the title from scraped data or derive from URL
+    let title = scraped.title.clone().unwrap_or_else(|| {
+        // Try to derive a title from the URL
+        url.split('/').last().unwrap_or(url).to_string()
+    });
+    
+    // Split text content into segments (paragraphs)
+    let paragraphs: Vec<&str> = scraped.text_content.lines().filter(|line| !line.trim().is_empty()).collect();
+    
+    // Create segments from paragraphs
+    let segments: Vec<Segment> = paragraphs
+        .iter()
+        .enumerate()
+        .map(|(i, &text)| {
+            let segment_text = text.trim().to_string();
+            if segment_text.is_empty() {
+                return None;
+            }
+            
+            // Create a segment ID based on the text content
+            let segment_id = core::compute_segment_id(&segment_text);
+            
+            Some(Segment {
+                segment_id,
+                text: segment_text,
+                path: format!("p[{}]", i),
+                position: i,
+            })
+        })
+        .flatten()
+        .collect();
+    
+    // Compute document ID based on content
+    let content_for_id = segments.iter().map(|s| s.text.clone()).collect::<Vec<_>>().join("\n");
+    let doc_id = core::compute_doc_id(&content_for_id, "paragraphs", "websearch");
+    
+    Document {
+        schema_version: core::SCHEMA_VERSION.to_string(),
+        doc_id,
+        url: url.to_string(),
+        title,
+        lang: "en".to_string(), // Default to English for now
+        fetched_at,
+        segments,
+        hints: Some(HashMap::new()), // Empty hints for now
+    }
+}
+
 /// Scrapes a webpage and returns structured data
 ///
 /// # Arguments
@@ -47,7 +104,7 @@ pub struct ErrorResponse {
 ///
 /// # Example
 ///
-/// ```
+/// ```rust
 /// use websearch::scrape_webpage;
 ///
 /// #[tokio::main]

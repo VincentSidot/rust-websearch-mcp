@@ -8,6 +8,7 @@ clap = { version = "4.0", features = ["derive"] }
 core = { path = "../core" }
 analyzer = { path = "../analyzer" }
 summarizer = { path = "../summarizer" }
+websearch = { path = "../websearch" }
 logger = { path = "../logger" }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }

@@ -212,7 +212,7 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
 
 ## 4) Orchestration (CLI)
 
-- [ ] Extend `bin/cli.rs` with subcommands:
+- [x] Extend `bin/cli.rs` with subcommands:
   - `scrape <url>` → `Document` JSON to stdout/file.
   - `analyze <doc.json>` → `AnalyzeResponse` JSON.
   - `summarize <analyze.json>` → `SummarizeResponse` JSON.
@@ -224,6 +224,18 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
 **Test policy**
 - `assert_cmd` integration for each subcommand.
 - End-to-end on fixtures: final summary JSON snapshot.
+
+### Progress Log
+
+- **2025-08-24**: Step 4A: Orchestrator — end-to-end `run <url>` pipeline with JSON outputs
+  - Implemented the `run` subcommand in the CLI that executes the full pipeline: scrape → analyze → summarize
+  - Added flags for output directory, top-n segments, MMR lambda, summary style, and API timeout
+  - Implemented in-memory orchestration that passes data between stages without temporary files
+  - Added proper JSON output files for document, analysis, and summary with clear paths and logs
+  - Integrated config plumbing to pass relevant sections to each stage
+  - Added logging for URL, language, selected segment count, model fingerprint, summary style, and per-stage timing
+  - Implemented failure handling with non-zero exit codes and extractive fallback for summarization
+  - Verified that the workspace builds successfully and the CLI compiles without errors
 
 ---
 

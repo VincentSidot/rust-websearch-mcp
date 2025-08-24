@@ -4,6 +4,8 @@ use dotenvy::dotenv;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use tokio;
+use std::path::Path;
+use std::fs;
 
 /// CLI for the websearch pipeline
 #[derive(Parser)]
@@ -72,6 +74,30 @@ enum Commands {
     Run {
         /// The URL to process
         url: String,
+
+        /// Output directory (default: ./out)
+        #[clap(long, default_value = "./out")]
+        out_dir: String,
+
+        /// Number of top segments to select
+        #[clap(long, default_value = "10")]
+        top_n: usize,
+
+        /// MMR lambda parameter (0.0 = centroid only, 1.0 = diversity only)
+        #[clap(long, default_value = "0.65")]
+        mmr_lambda: f32,
+
+        /// Style of summary to generate
+        #[clap(long, default_value = "abstract_with_bullets")]
+        style: String,
+
+        /// Timeout for API requests (in milliseconds)
+        #[clap(long, default_value = "30000")]
+        timeout_ms: u64,
+
+        /// Path to configuration file
+        #[clap(long)]
+        config: Option<String>,
     },
 }
 
@@ -116,9 +142,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             summarize_document(analysis, document, style, *timeout_ms, *temperature).await?;
         }
-        Commands::Run { url } => {
-            println!("Running full pipeline for URL: {}", url);
-            // TODO: Implement full pipeline
+        Commands::Run {
+            url,
+            out_dir,
+            top_n,
+            mmr_lambda,
+            style,
+            timeout_ms,
+            config: _config,
+        } => {
+            run_pipeline(url, out_dir, *top_n, *mmr_lambda, style, *timeout_ms).await?;
         }
     }
 
@@ -263,5 +296,179 @@ async fn summarize_document(
     serde_json::to_writer_pretty(std::io::stdout(), &response)?;
 
     println!("Summarization complete");
+    Ok(())
+}
+
+/// Run the full pipeline: scrape → analyze → summarize
+async fn run_pipeline(
+    url: &str,
+    out_dir: &str,
+    top_n: usize,
+    mmr_lambda: f32,
+    style: &str,
+    timeout_ms: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use websearch::{scrape_webpage, scraped_to_document};
+    
+    println!("Running full pipeline for URL: {}", url);
+    println!("Output directory: {}", out_dir);
+    println!("Top N segments: {}", top_n);
+    println!("MMR lambda: {}", mmr_lambda);
+    println!("Summary style: {}", style);
+    println!("API timeout: {} ms", timeout_ms);
+
+    // Create output directory if it doesn't exist
+    fs::create_dir_all(out_dir)?;
+
+    // Record start time
+    let start_time = std::time::Instant::now();
+
+    // Step 1: Scrape the webpage
+    println!("\n--- Step 1: Scraping ---");
+    let scrape_start = std::time::Instant::now();
+    let scraped_data = scrape_webpage(url).await?;
+    let scrape_duration = scrape_start.elapsed();
+    println!("Scraping completed in {:?}", scrape_duration);
+
+    // Convert scraped data to Document
+    let document = scraped_to_document(url, &scraped_data);
+    println!("Document ID: {}", document.doc_id);
+    println!("Document title: {}", document.title);
+    println!("Document language: {}", document.lang);
+    println!("Number of segments: {}", document.segments.len());
+
+    // Write document to file
+    let document_path = Path::new(out_dir).join("document.json");
+    let document_file = File::create(&document_path)?;
+    let document_writer = BufWriter::new(document_file);
+    serde_json::to_writer_pretty(document_writer, &document)?;
+    println!("Document written to: {}", document_path.display());
+
+    // Step 2: Analyze the document
+    println!("\n--- Step 2: Analyzing ---");
+    let analyze_start = std::time::Instant::now();
+    
+    // Create analyzer configuration
+    let analyzer_config = analyzer::config::AnalyzerConfig {
+        backend: "onnx".to_string(),
+        model: analyzer::config::ModelConfig::HuggingFace(
+            analyzer::config::HuggingFaceModelConfig {
+                repo_id: "BAAI/bge-small-en-v1.5".to_string(),
+                revision: "main".to_string(),
+                files: vec![
+                    "onnx/model.onnx".to_string(),
+                    "tokenizer.json".to_string(),
+                    "special_tokens_map.json".to_string(),
+                ],
+            },
+        ),
+        mmr_lambda,
+        top_n,
+        rerank: false,
+        reranker_model_id: "".to_string(),
+        allow_downloads: true,
+    };
+
+    // Create analyzer
+    let mut analyzer = analyzer::Analyzer::new(analyzer_config)?;
+
+    // Log model info
+    println!("Model ID: {}", analyzer.model_fingerprint());
+    println!("Embedding dimension: 384");
+
+    // Analyze document
+    let analysis_response = analyzer.analyze(&document)?;
+    let analyze_duration = analyze_start.elapsed();
+    println!("Analysis completed in {:?}", analyze_duration);
+    println!("Selected segments: {}", analysis_response.top_segments.len());
+
+    // Write analysis to file
+    let analysis_path = Path::new(out_dir).join("analysis.json");
+    let analysis_file = File::create(&analysis_path)?;
+    let analysis_writer = BufWriter::new(analysis_file);
+    serde_json::to_writer_pretty(analysis_writer, &analysis_response)?;
+    println!("Analysis written to: {}", analysis_path.display());
+
+    // Step 3: Summarize the document
+    println!("\n--- Step 3: Summarizing ---");
+    let summarize_start = std::time::Instant::now();
+    
+    // Create summarizer configuration
+    let style_enum = match style {
+        "abstract_with_bullets" => summarizer::config::SummaryStyle::AbstractWithBullets,
+        "tldr" => summarizer::config::SummaryStyle::TlDr,
+        "extractive" => summarizer::config::SummaryStyle::Extractive,
+        _ => summarizer::config::SummaryStyle::AbstractWithBullets, // Default
+    };
+
+    let summarizer_config = summarizer::config::SummarizerConfig {
+        base_url: std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
+        model: std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-3.5-turbo".to_string()),
+        timeout_ms,
+        temperature: 0.2, // Default temperature
+        max_tokens: None, // Not configurable via CLI in this MVP
+        style: style_enum,
+        api_key: std::env::var("OPENAI_API_KEY").ok(),
+    };
+
+    // Log config info
+    println!("Model: {}", summarizer_config.model);
+    println!("Timeout: {} ms", summarizer_config.timeout_ms);
+    println!("Style: {:?}", summarizer_config.style);
+
+    // Create summarizer
+    let summarizer = summarizer::Summarizer::new(summarizer_config)?;
+
+    // Summarize document (with fallback on error)
+    let summary_response = match summarizer.summarize(&document, &analysis_response).await {
+        Ok(response) => response,
+        Err(e) => {
+            println!("Warning: Summarization failed with error: {}. Using extractive fallback.", e);
+            // Create a fallback summary response
+            core::SummarizeResponse {
+                summary_text: "Summary generation failed. Using extractive fallback.".to_string(),
+                bullets: None,
+                citations: None,
+                guardrails: Some(core::GuardrailsInfo {
+                    filtered: true,
+                    reason: Some(format!("API error: {}", e)),
+                }),
+                metrics: core::SummarizationMetrics {
+                    processing_time_ms: summarize_start.elapsed().as_millis() as u64,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                },
+            }
+        }
+    };
+    
+    let summarize_duration = summarize_start.elapsed();
+    println!("Summarization completed in {:?}", summarize_duration);
+
+    // Write summary to file
+    let summary_path = Path::new(out_dir).join("summary.json");
+    let summary_file = File::create(&summary_path)?;
+    let summary_writer = BufWriter::new(summary_file);
+    serde_json::to_writer_pretty(summary_writer, &summary_response)?;
+    println!("Summary written to: {}", summary_path.display());
+
+    // Print final summary
+    println!("\n--- Summary ---");
+    println!("{}", summary_response.summary_text);
+    if let Some(bullets) = &summary_response.bullets {
+        println!("\nKey Points:");
+        for (i, bullet) in bullets.iter().enumerate() {
+            println!("{}. {}", i + 1, bullet);
+        }
+    }
+
+    // Print completion info
+    let total_duration = start_time.elapsed();
+    println!("\n--- Pipeline completed in {:?} ---", total_duration);
+    println!("Output files:");
+    println!("  Document:  {}", document_path.display());
+    println!("  Analysis:  {}", analysis_path.display());
+    println!("  Summary:   {}", summary_path.display());
+
     Ok(())
 }
