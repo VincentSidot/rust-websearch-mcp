@@ -15,7 +15,7 @@ toml = "0.8"
 
 # Embedded database for caching
 sled = "0.34"
-bincode = "1.3"
+bincode = "2.0"
 
 # Tokenizers for text processing
 tokenizers = "0.20"
