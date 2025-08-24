@@ -457,6 +457,7 @@ mod tests {
     fn test_resolve_selected_segments() {
         let document = create_test_document();
         let analysis = create_test_analysis();
+        let _analysis = &analysis; // Silence unused variable warning
 
         let config = SummarizerConfig::new();
         let summarizer = Summarizer::new(config).unwrap();
@@ -502,7 +503,8 @@ mod tests {
         let (summary, metrics) = summarizer.extractive_fallback(&selected_segments, start_time);
         
         assert!(!summary.is_empty());
-        assert!(metrics.processing_time_ms >= 0);
+        // Remove the useless comparison warning
+        // assert!(metrics.processing_time_ms >= 0); // u64 is always >= 0
         assert!(metrics.input_tokens > 0);
         assert!(metrics.output_tokens > 0);
     }
