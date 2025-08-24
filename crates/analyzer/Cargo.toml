@@ -41,11 +41,7 @@ thiserror = "1.0"
 ndarray = "0.15"
 
 # ONNX Runtime (target-specific)
-[target.'cfg(target_os = "windows")'.dependencies]
 ort = { version = "2.0.0-rc.8", features = ["load-dynamic"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-ort = { version = "2.0.0-rc.8", features = ["download-binaries"] }
 
 [dev-dependencies]
 # Testing utilities

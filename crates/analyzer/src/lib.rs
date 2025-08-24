@@ -47,11 +47,27 @@ pub struct Analyzer {
     reranker_model_fingerprint: Option<String>,
 }
 
+#[cfg(target_os = "windows")]
+const ORT_DEFAULT_PATH: &str = "./onnxruntime.dll";
+#[cfg(target_os = "linux")]
+const ORT_DEFAULT_PATH: &str = "./libonnxruntime.so";
+
 impl Analyzer {
     /// Create a new analyzer with the given configuration
     pub async fn new(config: AnalyzerConfig) -> Result<Self, Box<dyn std::error::Error>> {
-        Self::ensure_ort_loaded_on_windows(); // Ensure windows linked well
-        info!("Initializing analyzer with config: {:?}", config);
+        debug!("Initializing analyzer with config: {:?}", config);
+
+        {
+            // Init ort to the path
+            let path = config
+                .onnx_provider
+                .as_ref()
+                .and_then(|path| path.to_str())
+                .unwrap_or(ORT_DEFAULT_PATH);
+
+            info!("Loading ONNX provider: '{}'", path);
+            ort::init_from(path).commit()?;
+        }
 
         // Initialize cache
         let cache = EmbeddingCache::new(config.cache.clone())?;
@@ -93,60 +109,71 @@ impl Analyzer {
         info!("Model fingerprint: {}", model_fingerprint);
 
         // Initialize reranker if enabled
-        let (reranker_session, reranker_tokenizer, reranker_model_fingerprint) = if config.rerank && config.reranker.enabled {
-            info!("Initializing reranker");
-            
-            // Create a temporary config for the reranker model
-            let reranker_config = AnalyzerConfig {
-                backend: config.backend.clone(),
-                model: config.reranker.model.clone(),
-                mmr_lambda: config.mmr_lambda,
-                top_n: config.top_n,
-                rerank: false, // Disable nested reranking
-                reranker: RerankerConfig::default(), // Default reranker config
-                allow_downloads: config.allow_downloads,
-                cache: config.cache.clone(),
-            };
-            
-            // Resolve reranker model files
-            let resolved_reranker_model = model::resolve_model(&reranker_config).await?;
-            info!("Resolved reranker model files: {:?}", resolved_reranker_model.file_paths);
+        let (reranker_session, reranker_tokenizer, reranker_model_fingerprint) =
+            if config.rerank && config.reranker.enabled {
+                info!("Initializing reranker");
 
-            // Find the ONNX model file and tokenizer file for reranker
-            let mut reranker_model_path = None;
-            let mut reranker_tokenizer_path = None;
+                // Create a temporary config for the reranker model
+                let reranker_config = AnalyzerConfig {
+                    backend: config.backend.clone(),
+                    model: config.reranker.model.clone(),
+                    mmr_lambda: config.mmr_lambda,
+                    top_n: config.top_n,
+                    rerank: false,                       // Disable nested reranking
+                    reranker: RerankerConfig::default(), // Default reranker config
+                    allow_downloads: config.allow_downloads,
+                    cache: config.cache.clone(),
+                    onnx_provider: None, // No need to setup onnx_provider as it's already have been loaded
+                };
 
-            for path in &resolved_reranker_model.file_paths {
-                let path_str = path.to_string_lossy();
-                if path_str.contains("model.onnx") {
-                    reranker_model_path = Some(path.clone());
-                } else if path_str.contains("tokenizer.json") {
-                    reranker_tokenizer_path = Some(path.clone());
+                // Resolve reranker model files
+                let resolved_reranker_model = model::resolve_model(&reranker_config).await?;
+                info!(
+                    "Resolved reranker model files: {:?}",
+                    resolved_reranker_model.file_paths
+                );
+
+                // Find the ONNX model file and tokenizer file for reranker
+                let mut reranker_model_path = None;
+                let mut reranker_tokenizer_path = None;
+
+                for path in &resolved_reranker_model.file_paths {
+                    let path_str = path.to_string_lossy();
+                    if path_str.contains("model.onnx") {
+                        reranker_model_path = Some(path.clone());
+                    } else if path_str.contains("tokenizer.json") {
+                        reranker_tokenizer_path = Some(path.clone());
+                    }
                 }
-            }
 
-            // Ensure we found both files
-            let reranker_model_path = reranker_model_path.ok_or("Reranker ONNX model file not found")?;
-            let reranker_tokenizer_path = reranker_tokenizer_path.ok_or("Reranker tokenizer file not found")?;
+                // Ensure we found both files
+                let reranker_model_path =
+                    reranker_model_path.ok_or("Reranker ONNX model file not found")?;
+                let reranker_tokenizer_path =
+                    reranker_tokenizer_path.ok_or("Reranker tokenizer file not found")?;
 
-            info!("Reranker model path: {:?}", reranker_model_path);
-            info!("Reranker tokenizer path: {:?}", reranker_tokenizer_path);
+                info!("Reranker model path: {:?}", reranker_model_path);
+                info!("Reranker tokenizer path: {:?}", reranker_tokenizer_path);
 
-            // Load the reranker tokenizer
-            let reranker_tokenizer = Tokenizer::from_file(&reranker_tokenizer_path)
-                .map_err(|e| format!("Failed to load reranker tokenizer: {}", e))?;
+                // Load the reranker tokenizer
+                let reranker_tokenizer = Tokenizer::from_file(&reranker_tokenizer_path)
+                    .map_err(|e| format!("Failed to load reranker tokenizer: {}", e))?;
 
-            // Create ONNX Runtime environment and session for reranker
-            let reranker_session = Session::builder()?.commit_from_file(reranker_model_path)?;
+                // Create ONNX Runtime environment and session for reranker
+                let reranker_session = Session::builder()?.commit_from_file(reranker_model_path)?;
 
-            // Get reranker model fingerprint
-            let reranker_model_fingerprint = resolved_reranker_model.fingerprint;
-            info!("Reranker model fingerprint: {}", reranker_model_fingerprint);
-            
-            (Some(reranker_session), Some(reranker_tokenizer), Some(reranker_model_fingerprint))
-        } else {
-            (None, None, None)
-        };
+                // Get reranker model fingerprint
+                let reranker_model_fingerprint = resolved_reranker_model.fingerprint;
+                info!("Reranker model fingerprint: {}", reranker_model_fingerprint);
+
+                (
+                    Some(reranker_session),
+                    Some(reranker_tokenizer),
+                    Some(reranker_model_fingerprint),
+                )
+            } else {
+                (None, None, None)
+            };
 
         // Set batch size and max sequence length from config or defaults
         let _batch_size = 8; // Default batch size (no longer used)
@@ -167,26 +194,6 @@ impl Analyzer {
         })
     }
 
-    // somewhere in analyzer init code (called by your CLI before creating the ORT session)
-    pub fn ensure_ort_loaded_on_windows() {
-        #[cfg(target_os = "windows")]
-        {
-            static DO_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-
-            DO_ONCE.get_or_init(|| {
-                use std::{env, path::Path};
-                if env::var_os("ORT_DYLIB_PATH").is_none() {
-                    if let Some(prebuilt) = option_env!("ORT_PREBUILT_DLL") {
-                        if !prebuilt.is_empty() && Path::new(prebuilt).exists() {
-                            env::set_var("ORT_DYLIB_PATH", prebuilt);
-                        }
-                    }
-                }
-                ()
-            });
-        }
-    }
-
     /// Get the model fingerprint
     pub fn model_fingerprint(&self) -> &str {
         &self.model_fingerprint
@@ -198,16 +205,18 @@ impl Analyzer {
             "centroid_summary" => {
                 // Use document title and first sentence of first segment as query
                 let title = &document.title;
-                let first_segment_text = document.segments.first()
+                let first_segment_text = document
+                    .segments
+                    .first()
                     .map(|s| s.text.as_str())
                     .unwrap_or("");
-                
+
                 // Extract first sentence (up to first period)
                 let first_sentence = first_segment_text
                     .split('.')
                     .next()
                     .unwrap_or(first_segment_text);
-                
+
                 if !title.is_empty() {
                     format!("{}: {}", title, first_sentence)
                 } else {
@@ -216,7 +225,9 @@ impl Analyzer {
             }
             _ => {
                 // Default to first segment text
-                document.segments.first()
+                document
+                    .segments
+                    .first()
                     .map(|s| s.text.clone())
                     .unwrap_or_else(|| "Document content".to_string())
             }
@@ -229,7 +240,7 @@ impl Analyzer {
         document: &Document,
     ) -> Result<AnalyzeResponse, Box<dyn std::error::Error>> {
         info!("Analyzing document: {}", document.doc_id);
-        
+
         // Reset cache counters for this run
         self.cache.reset_counters();
 
@@ -265,94 +276,101 @@ impl Analyzer {
             self.config.reranker.top_m.min(document.segments.len()),
             self.config.mmr_lambda,
         );
-        debug!("Selected {} segments using MMR for reranking", mmr_selected_indices.len());
+        debug!(
+            "Selected {} segments using MMR for reranking",
+            mmr_selected_indices.len()
+        );
 
         // Apply reranking if enabled
-        let (final_selected_indices, top_segments) = if self.config.rerank && self.config.reranker.enabled {
-            info!("Applying reranking");
-            
-            // Record start time
-            let rerank_start = std::time::Instant::now();
-            
-            // Build query for reranking
-            let query = self.build_rerank_query(document);
-            info!("Rerank query: {}", query);
-            
-            // Get the segments for reranking
-            let rerank_segments: Vec<&kernel::Segment> = mmr_selected_indices
-                .iter()
-                .map(|&idx| &document.segments[idx])
-                .collect();
-            
-            // Rerank segments
-            let reranked_indices_scores = self.rerank_segments(&query, &rerank_segments)?;
-            
-            // Take top N from reranked results
-            let top_n = self.config.top_n.min(reranked_indices_scores.len());
-            let final_reranked = reranked_indices_scores.into_iter().take(top_n).collect::<Vec<_>>();
-            
-            // Map back to original indices
-            let final_indices: Vec<usize> = final_reranked
-                .iter()
-                .map(|(idx, _)| mmr_selected_indices[*idx])
-                .collect();
-            
-            // Create SegmentScore objects with rerank scores
-            let segments_with_scores: Vec<SegmentScore> = final_reranked
-                .iter()
-                .map(|(idx, score)| {
-                    let original_idx = mmr_selected_indices[*idx];
-                    let segment = &document.segments[original_idx];
-                    SegmentScore {
-                        segment_id: segment.segment_id.clone(),
-                        score_representative: centroid_similarities[original_idx],
-                        score_diversity: 0.0, // TODO: Compute actual diversity score
-                        score_rerank: Some(*score),
-                        reason: if *idx == 0 {
-                            "rerank: highly relevant".to_string()
-                        } else {
-                            "rerank: relevant".to_string()
-                        },
-                    }
-                })
-                .collect();
-            
-            // Record end time
-            let rerank_duration = rerank_start.elapsed();
-            info!("Reranking completed in {:?}", rerank_duration);
-            
-            (final_indices, segments_with_scores)
-        } else {
-            // Use original MMR selection without reranking
-            let selected_indices = mmr_selection(
-                &embeddings,
-                &centroid_similarities,
-                self.config.top_n,
-                self.config.mmr_lambda,
-            );
-            debug!("Selected {} segments using MMR", selected_indices.len());
+        let (final_selected_indices, top_segments) =
+            if self.config.rerank && self.config.reranker.enabled {
+                info!("Applying reranking");
 
-            // Create SegmentScore objects
-            let segments_with_scores: Vec<SegmentScore> = selected_indices
-                .iter()
-                .map(|&idx| {
-                    let segment = &document.segments[idx];
-                    SegmentScore {
-                        segment_id: segment.segment_id.clone(),
-                        score_representative: centroid_similarities[idx],
-                        score_diversity: 0.0, // TODO: Compute actual diversity score
-                        score_rerank: None,
-                        reason: if idx == selected_indices[0] {
-                            "highly central".to_string()
-                        } else {
-                            "diversity pick".to_string()
-                        },
-                    }
-                })
-                .collect();
-            
-            (selected_indices, segments_with_scores)
-        };
+                // Record start time
+                let rerank_start = std::time::Instant::now();
+
+                // Build query for reranking
+                let query = self.build_rerank_query(document);
+                info!("Rerank query: {}", query);
+
+                // Get the segments for reranking
+                let rerank_segments: Vec<&kernel::Segment> = mmr_selected_indices
+                    .iter()
+                    .map(|&idx| &document.segments[idx])
+                    .collect();
+
+                // Rerank segments
+                let reranked_indices_scores = self.rerank_segments(&query, &rerank_segments)?;
+
+                // Take top N from reranked results
+                let top_n = self.config.top_n.min(reranked_indices_scores.len());
+                let final_reranked = reranked_indices_scores
+                    .into_iter()
+                    .take(top_n)
+                    .collect::<Vec<_>>();
+
+                // Map back to original indices
+                let final_indices: Vec<usize> = final_reranked
+                    .iter()
+                    .map(|(idx, _)| mmr_selected_indices[*idx])
+                    .collect();
+
+                // Create SegmentScore objects with rerank scores
+                let segments_with_scores: Vec<SegmentScore> = final_reranked
+                    .iter()
+                    .map(|(idx, score)| {
+                        let original_idx = mmr_selected_indices[*idx];
+                        let segment = &document.segments[original_idx];
+                        SegmentScore {
+                            segment_id: segment.segment_id.clone(),
+                            score_representative: centroid_similarities[original_idx],
+                            score_diversity: 0.0, // TODO: Compute actual diversity score
+                            score_rerank: Some(*score),
+                            reason: if *idx == 0 {
+                                "rerank: highly relevant".to_string()
+                            } else {
+                                "rerank: relevant".to_string()
+                            },
+                        }
+                    })
+                    .collect();
+
+                // Record end time
+                let rerank_duration = rerank_start.elapsed();
+                info!("Reranking completed in {:?}", rerank_duration);
+
+                (final_indices, segments_with_scores)
+            } else {
+                // Use original MMR selection without reranking
+                let selected_indices = mmr_selection(
+                    &embeddings,
+                    &centroid_similarities,
+                    self.config.top_n,
+                    self.config.mmr_lambda,
+                );
+                debug!("Selected {} segments using MMR", selected_indices.len());
+
+                // Create SegmentScore objects
+                let segments_with_scores: Vec<SegmentScore> = selected_indices
+                    .iter()
+                    .map(|&idx| {
+                        let segment = &document.segments[idx];
+                        SegmentScore {
+                            segment_id: segment.segment_id.clone(),
+                            score_representative: centroid_similarities[idx],
+                            score_diversity: 0.0, // TODO: Compute actual diversity score
+                            score_rerank: None,
+                            reason: if idx == selected_indices[0] {
+                                "highly central".to_string()
+                            } else {
+                                "diversity pick".to_string()
+                            },
+                        }
+                    })
+                    .collect();
+
+                (selected_indices, segments_with_scores)
+            };
 
         // Compute average pairwise cosine similarity among selected segments
         let avg_pairwise_cosine = if final_selected_indices.len() > 1 {
@@ -419,10 +437,10 @@ impl Analyzer {
 
         for segment in &document.segments {
             // Try to get embedding from cache first
-            if let Some(cached_embedding) = self.cache.get_embedding(
-                &segment.segment_id,
-                &self.model_fingerprint,
-            )? {
+            if let Some(cached_embedding) = self
+                .cache
+                .get_embedding(&segment.segment_id, &self.model_fingerprint)?
+            {
                 debug!("Using cached embedding for segment: {}", segment.segment_id);
                 all_embeddings.push(cached_embedding);
                 continue;
@@ -431,14 +449,11 @@ impl Analyzer {
             // Generate embedding if not in cache
             debug!("Generating embedding for segment: {}", segment.segment_id);
             let embedding = self.generate_single_embedding(&segment.text)?;
-            
+
             // Cache the embedding
-            self.cache.put_embedding(
-                &segment.segment_id,
-                &self.model_fingerprint,
-                &embedding,
-            )?;
-            
+            self.cache
+                .put_embedding(&segment.segment_id, &self.model_fingerprint, &embedding)?;
+
             all_embeddings.push(embedding);
         }
 
@@ -474,16 +489,27 @@ impl Analyzer {
             return Err("Reranker not enabled".into());
         }
 
-        let _reranker_session = self.reranker_session.as_ref().ok_or("Reranker session not initialized")?;
-        let reranker_tokenizer = self.reranker_tokenizer.as_ref().ok_or("Reranker tokenizer not initialized")?;
+        let _reranker_session = self
+            .reranker_session
+            .as_ref()
+            .ok_or("Reranker session not initialized")?;
+        let reranker_tokenizer = self
+            .reranker_tokenizer
+            .as_ref()
+            .ok_or("Reranker tokenizer not initialized")?;
 
-        info!("Reranking {} segments with query: {}", segments.len(), query);
+        info!(
+            "Reranking {} segments with query: {}",
+            segments.len(),
+            query
+        );
 
         // Record start time
         let start_time = std::time::Instant::now();
 
         // Create pairs of (query, segment_text)
-        let pairs: Vec<(&str, &str)> = segments.iter()
+        let pairs: Vec<(&str, &str)> = segments
+            .iter()
             .map(|segment| (query, segment.text.as_str()))
             .collect();
 
@@ -551,7 +577,8 @@ impl Analyzer {
         info!("Reranking completed in {:?}", duration);
 
         // Create index-score pairs and sort by score (descending)
-        let mut indexed_scores: Vec<(usize, f32)> = segments.iter()
+        let mut indexed_scores: Vec<(usize, f32)> = segments
+            .iter()
             .enumerate()
             .map(|(i, _)| (i, scores[i]))
             .collect();

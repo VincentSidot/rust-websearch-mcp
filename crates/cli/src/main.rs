@@ -3,7 +3,7 @@ use kernel::{AnalyzeResponse, Document};
 use std::fs;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio;
 
 /// CLI for the websearch pipeline
@@ -54,6 +54,10 @@ enum Commands {
         /// Output file path (stdout if not provided)
         #[clap(short, long)]
         output: Option<String>,
+
+        /// ONNX Provider to use, if not set it will try fetch one in current directory
+        #[clap(long)]
+        onnx_provider: Option<PathBuf>,
     },
     /// Summarize analyzed content
     Summarize {
@@ -113,6 +117,10 @@ enum Commands {
         /// Path to configuration file
         #[clap(long)]
         config: Option<String>,
+
+        /// ONNX Provider to use, if not set it will try fetch one in current directory
+        #[clap(long)]
+        onnx_provider: Option<PathBuf>,
     },
     /// Cache management commands
     Cache {
@@ -136,7 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cli = Cli::parse();
 
-    match &cli.command {
+    match cli.command {
         Commands::Scrape { url } => {
             println!("Scraping URL: {}", url);
             // TODO: Implement scraping
@@ -150,16 +158,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             batch_size,
             max_seq_len,
             output,
+            onnx_provider,
         } => {
             analyze_document(
-                path,
-                *top_n,
-                *mmr_lambda,
-                *rerank,
-                *rerank_top_m,
-                *batch_size,
-                *max_seq_len,
-                output.as_deref(),
+                &path,
+                top_n,
+                mmr_lambda,
+                rerank,
+                rerank_top_m,
+                batch_size,
+                max_seq_len,
+                onnx_provider,
+                output,
             )
             .await?;
         }
@@ -170,7 +180,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             timeout_ms,
             temperature,
         } => {
-            summarize_document(analysis, document, style, *timeout_ms, *temperature).await?;
+            summarize_document(&analysis, &document, &style, timeout_ms, temperature).await?;
         }
         Commands::Run {
             url,
@@ -182,8 +192,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             style,
             timeout_ms,
             config: _config,
+            onnx_provider,
         } => {
-            run_pipeline(url, out_dir, *top_n, *mmr_lambda, *rerank, *rerank_top_m, style, *timeout_ms).await?;
+            run_pipeline(
+                &url,
+                &out_dir,
+                top_n,
+                mmr_lambda,
+                rerank,
+                rerank_top_m,
+                &style,
+                timeout_ms,
+                onnx_provider,
+            )
+            .await?;
         }
         Commands::Cache { subcommand } => match subcommand {
             CacheCommands::Stats => {
@@ -192,7 +214,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             CacheCommands::Clear => {
                 cache_clear().await?;
             }
-        }
+        },
     }
 
     Ok(())
@@ -206,7 +228,8 @@ async fn analyze_document(
     rerank_top_m: usize,
     batch_size: usize,
     max_seq_len: usize,
-    output: Option<&str>,
+    onnx_provider: Option<PathBuf>,
+    output: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Analyzing document: {}", path);
 
@@ -239,20 +262,17 @@ async fn analyze_document(
         },
         allow_downloads: true,
         cache: analyzer::config::CacheConfig::default(),
+        onnx_provider,
     };
 
     // If rerank is enabled, update the reranker model config
     if rerank {
-        config.reranker.model = analyzer::config::ModelConfig::HuggingFace(
-            analyzer::config::HuggingFaceModelConfig {
+        config.reranker.model =
+            analyzer::config::ModelConfig::HuggingFace(analyzer::config::HuggingFaceModelConfig {
                 repo_id: "BAAI/bge-reranker-base".to_string(),
                 revision: "main".to_string(),
-                files: vec![
-                    "onnx/model.onnx".to_string(),
-                    "tokenizer.json".to_string(),
-                ],
-            },
-        );
+                files: vec!["onnx/model.onnx".to_string(), "tokenizer.json".to_string()],
+            });
     }
 
     // Create analyzer
@@ -382,6 +402,7 @@ async fn run_pipeline(
     rerank_top_m: usize,
     style: &str,
     timeout_ms: u64,
+    onnx_provider: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use websearch::{scrape_webpage, scraped_to_document};
 
@@ -453,20 +474,17 @@ async fn run_pipeline(
         },
         allow_downloads: true,
         cache: analyzer::config::CacheConfig::default(),
+        onnx_provider,
     };
 
     // If rerank is enabled, update the reranker model config
     if rerank {
-        analyzer_config.reranker.model = analyzer::config::ModelConfig::HuggingFace(
-            analyzer::config::HuggingFaceModelConfig {
+        analyzer_config.reranker.model =
+            analyzer::config::ModelConfig::HuggingFace(analyzer::config::HuggingFaceModelConfig {
                 repo_id: "BAAI/bge-reranker-base".to_string(),
                 revision: "main".to_string(),
-                files: vec![
-                    "onnx/model.onnx".to_string(),
-                    "tokenizer.json".to_string(),
-                ],
-            },
-        );
+                files: vec!["onnx/model.onnx".to_string(), "tokenizer.json".to_string()],
+            });
     }
 
     // Create analyzer
@@ -509,9 +527,8 @@ async fn run_pipeline(
     };
 
     let summarizer_config = summarizer::config::SummarizerConfig {
-        base_url: std::env::var("OPENAI_BASE_URL")
-            .unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
-        model: std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-3.5-turbo".to_string()),
+        base_url: std::env::var("OPENAI_BASE_URL").expect("Missing OPENAI_BASE_URL key"),
+        model: std::env::var("OPENAI_MODEL").expect("Missing OPENAI_MODEL key"),
         timeout_ms,
         temperature: 0.2, // Default temperature
         max_tokens: None, // Not configurable via CLI in this MVP
@@ -588,17 +605,17 @@ async fn run_pipeline(
 async fn cache_stats() -> Result<(), Box<dyn std::error::Error>> {
     // Create default analyzer config to get cache path
     let config = analyzer::config::AnalyzerConfig::new();
-    
+
     // Initialize cache
     let cache = analyzer::cache::EmbeddingCache::new(config.cache)?;
-    
+
     // Get stats
     let stats = cache.get_stats()?;
-    
+
     println!("Cache Statistics:");
     println!("  Entry Count: {}", stats.entry_count);
     println!("  Estimated Size: {} bytes", stats.total_size_bytes);
-    
+
     Ok(())
 }
 
@@ -606,14 +623,14 @@ async fn cache_stats() -> Result<(), Box<dyn std::error::Error>> {
 async fn cache_clear() -> Result<(), Box<dyn std::error::Error>> {
     // Create default analyzer config to get cache path
     let config = analyzer::config::AnalyzerConfig::new();
-    
+
     // Initialize cache
     let cache = analyzer::cache::EmbeddingCache::new(config.cache)?;
-    
+
     // Clear cache
     cache.clear()?;
-    
+
     println!("Cache cleared successfully");
-    
+
     Ok(())
 }

@@ -3,11 +3,10 @@
 //! This module provides logging functionality.
 //! It sets up a logger with a default level of INFO.
 //! The log level can be controlled via the RUST_LOG environment variable.
-
-use colored::Colorize;
 use std::sync::OnceLock;
 
-use log::Log;
+use colored::Colorize;
+use log::{Level, LevelFilter, Log};
 
 struct Logger {
     level: log::Level,
@@ -64,15 +63,24 @@ impl Log for Logger {
 pub fn init_logger() {
     static LOGGER: OnceLock<Logger> = OnceLock::new();
 
+    let level = std::env::var("LOG_LEVEL")
+        .ok()
+        .and_then(|level_str| level_str.to_uppercase().parse::<log::Level>().ok())
+        .unwrap_or(log::Level::Info); // Default to INFO if parsing fails
+
+    let level_filter = match level {
+        Level::Error => LevelFilter::Error,
+        Level::Warn => LevelFilter::Warn,
+        Level::Info => LevelFilter::Info,
+        Level::Debug => LevelFilter::Debug,
+        Level::Trace => LevelFilter::Trace,
+    };
+
     log::set_logger(LOGGER.get_or_init(|| {
         utils::env::load_env();
-        let level = std::env::var("LOG_LEVEL")
-            .ok()
-            .and_then(|level_str| level_str.to_uppercase().parse::<log::Level>().ok())
-            .unwrap_or(log::Level::Info); // Default to INFO if parsing fails
-
         Logger { level }
     }))
+    .map(|()| log::set_max_level(level_filter))
     .expect("Failed to set logger");
 
     log::info!("Logger initialized");

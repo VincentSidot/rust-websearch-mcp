@@ -9,3 +9,9 @@
 /test_out
 /test-out
 /.cache
+
+# Onnx runtime
+/onnxruntime.dll
+/libonnxruntime.so
+/onnxruntime_providers_*.dll
+/libonnxruntime_providers_*.so

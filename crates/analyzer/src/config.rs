@@ -5,7 +5,7 @@
 
 use kernel::Config as CoreConfig;
 use serde::{Deserialize, Serialize};
-use std::env;
+use std::{env, path::PathBuf};
 
 /// Configuration for the analyzer
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -37,6 +37,9 @@ pub struct AnalyzerConfig {
     /// Cache configuration
     #[serde(default)]
     pub cache: CacheConfig,
+
+    /// ORT File download
+    pub onnx_provider: Option<PathBuf>,
 }
 
 /// Configuration for model loading
@@ -117,10 +120,7 @@ impl Default for RerankerConfig {
             model: ModelConfig::HuggingFace(HuggingFaceModelConfig {
                 repo_id: "BAAI/bge-reranker-base".to_string(),
                 revision: "main".to_string(),
-                files: vec![
-                    "onnx/model.onnx".to_string(),
-                    "tokenizer.json".to_string(),
-                ],
+                files: vec!["onnx/model.onnx".to_string(), "tokenizer.json".to_string()],
             }),
             top_m: default_rerank_top_m(),
             score_field: default_rerank_score_field(),
@@ -189,6 +189,7 @@ impl AnalyzerConfig {
             reranker: RerankerConfig::default(),
             allow_downloads: default_allow_downloads(),
             cache: CacheConfig::default(),
+            onnx_provider: None,
         }
     }
 

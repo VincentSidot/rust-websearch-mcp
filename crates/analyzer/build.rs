@@ -1,70 +1,92 @@
 // crates/analyzer/build.rs
-#[cfg(target_os = "windows")]
-use std::{env, fs, io, path::PathBuf};
+use anyhow::{bail, Context};
+use std::{
+    env, fs, io,
+    path::{Path, PathBuf},
+};
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn main() -> anyhow::Result<()> {
     // Choose flavor via env: ORT_FLAVOR=cpu|gpu  (default: cpu)
     let flavor = env::var("ORT_FLAVOR").unwrap_or_else(|_| "cpu".into());
-    let (pkg, version) = match flavor.as_str() {
-        "gpu" => ("Microsoft.ML.OnnxRuntime.Gpu.Windows", "1.22.1"),
-        _ => ("Microsoft.ML.OnnxRuntime", "1.22.1"),
+    let version = "1.22.1";
+
+    // Resolve NuGet package, RID and file extension.
+    #[cfg(target_os = "windows")]
+    let (pkg, rid, ext) = {
+        let rid = match env::var("CARGO_CFG_TARGET_ARCH")?.as_str() {
+            "x86_64" => "win-x64",
+            "aarch64" => "win-arm64",
+            other => bail!("Unsupported Windows arch for ORT: {other}"),
+        };
+        let pkg = match flavor.as_str() {
+            "gpu" => "Microsoft.ML.OnnxRuntime.Gpu.Windows",
+            _ => "Microsoft.ML.OnnxRuntime",
+        };
+        (pkg, rid, ".dll")
     };
 
-    // Map target arch -> NuGet runtimes subdir
-    let arch = match env::var("CARGO_CFG_TARGET_ARCH").unwrap().as_str() {
-        "x86_64" => "win-x64",
-        "aarch64" => "win-arm64",
-        other => panic!("Unsupported Windows arch for ORT: {other}"),
+    #[cfg(target_os = "linux")]
+    let (pkg, rid, ext) = {
+        let rid = match env::var("CARGO_CFG_TARGET_ARCH")?.as_str() {
+            "x86_64" => "linux-x64",
+            "aarch64" => "linux-arm64",
+            other => bail!("Unsupported Linux arch for ORT: {other}"),
+        };
+        let pkg = match flavor.as_str() {
+            "gpu" => "Microsoft.ML.OnnxRuntime.Gpu.Linux",
+            _ => "Microsoft.ML.OnnxRuntime",
+        };
+        (pkg, rid, ".so")
     };
 
-    // Where we’ll stash the extracted DLL for this build
+    // Cache the .nupkg under OUT_DIR so subsequent builds are offline.
     let out_dir = PathBuf::from(env::var("OUT_DIR")?);
-    let ort_dir = out_dir.join("ort").join(arch);
-    fs::create_dir_all(&ort_dir)?;
+    let cache_dir = out_dir.join("ort_cache");
+    fs::create_dir_all(&cache_dir)?;
+    let nupkg_path = cache_dir.join(format!("{pkg}-{version}.nupkg"));
 
-    let dll_path = ort_dir.join("onnxruntime.dll");
-    if !dll_path.exists() {
-        // Download the NuGet .nupkg (it's a zip)
+    if !nupkg_path.exists() {
         let url = format!("https://www.nuget.org/api/v2/package/{pkg}/{version}");
-        let nupkg_path = out_dir.join("ort_download.nupkg");
-        if !nupkg_path.exists() {
-            eprintln!("Downloading {pkg} {version} …");
-            let bytes = reqwest::blocking::get(&url)?.error_for_status()?.bytes()?;
-            fs::write(&nupkg_path, &bytes)?;
-        }
+        eprintln!("Downloading {pkg} {version} …");
+        let bytes = reqwest::blocking::get(&url)?.error_for_status()?.bytes()?;
+        fs::write(&nupkg_path, &bytes)?;
+    }
 
-        // Extract only the DLL we need
-        let file = fs::File::open(&nupkg_path)?;
-        let mut zip = zip::ZipArchive::new(file)?;
-        let needle = format!("runtimes/{arch}/native/onnxruntime.dll").replace('/', "\\");
-        let mut found = false;
+    // Determine workspace root (prefer CARGO_WORKSPACE_DIR; robust fallback).
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
+    let workspace_dir = env::var("CARGO_WORKSPACE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| find_workspace_root(&manifest_dir).unwrap_or(manifest_dir.clone()));
 
-        for i in 0..zip.len() {
-            let mut entry = zip.by_index(i)?;
-            let name = entry.mangled_name();
-            // zip returns a PathBuf with `/`; normalize to Windows-style for comparison
-            let rel = name.to_string_lossy().replace('/', "\\");
-            if rel.ends_with(&needle) {
-                if let Some(parent) = dll_path.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                let mut out = fs::File::create(&dll_path)?;
-                io::copy(&mut entry, &mut out)?;
-                found = true;
-                break;
-            }
-        }
+    // Extract & copy all native libs for this RID into the WORKSPACE ROOT.
+    // This includes provider libs for GPU.
+    let file = fs::File::open(&nupkg_path)?;
+    let mut zip = zip::ZipArchive::new(file)?;
+    let needle_prefix = format!("runtimes/{rid}/native/");
+    let mut copied = 0usize;
 
-        if !found {
-            anyhow::bail!(
-                "onnxruntime.dll not found inside NuGet package {pkg} {version} for {arch}"
-            );
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i)?;
+        let name = entry.name().to_string(); // always '/' in zips
+        if name.starts_with(&needle_prefix) && name.ends_with(ext) {
+            let fname = Path::new(&name)
+                .file_name()
+                .context("zip entry without filename")?;
+            let dest = workspace_dir.join(fname);
+
+            // Always overwrite so version bumps take effect.
+            let mut out =
+                fs::File::create(&dest).with_context(|| format!("creating {}", dest.display()))?;
+            io::copy(&mut entry, &mut out)
+                .with_context(|| format!("writing {}", dest.display()))?;
+            copied += 1;
         }
     }
 
-    // Expose the absolute path to your Rust code at compile time
-    println!("cargo:rustc-env=ORT_PREBUILT_DLL={}", dll_path.display());
+    if copied == 0 {
+        bail!("No {ext} files under {needle_prefix} in NuGet package {pkg} {version}");
+    }
 
     // Rebuild conditions
     println!("cargo:rerun-if-changed=build.rs");
@@ -72,8 +94,27 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn main() {
-    // Prevent rerun on every build
+    // Prevent rerun every build on other OSes.
     println!("cargo:rerun-if-changed=build.rs");
+}
+
+// ---- helpers ----
+
+/// Walk up from `start` to find a Cargo.toml containing `[workspace]`.
+fn find_workspace_root(start: &Path) -> Option<PathBuf> {
+    let mut dir = Some(start);
+    while let Some(d) = dir {
+        let toml = d.join("Cargo.toml");
+        if toml.exists() {
+            if let Ok(s) = fs::read_to_string(&toml) {
+                if s.contains("[workspace]") {
+                    return Some(d.to_path_buf());
+                }
+            }
+        }
+        dir = d.parent();
+    }
+    None
 }
