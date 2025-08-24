@@ -26,8 +26,9 @@ pub struct AnalyzerConfig {
     /// Whether to use reranking
     pub rerank: bool,
 
-    /// Model ID for reranking (if enabled)
-    pub reranker_model_id: String,
+    /// Reranker configuration
+    #[serde(default)]
+    pub reranker: RerankerConfig,
 
     /// Whether to allow network downloads
     #[serde(default = "default_allow_downloads")]
@@ -85,6 +86,69 @@ pub struct CacheConfig {
     pub ttl_days: Option<u32>,
 }
 
+/// Configuration for reranker
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RerankerConfig {
+    /// Whether reranking is enabled
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Model configuration for reranker
+    #[serde(flatten)]
+    pub model: ModelConfig,
+
+    /// Number of top segments to consider for reranking (M)
+    #[serde(default = "default_rerank_top_m")]
+    pub top_m: usize,
+
+    /// Field to use for scoring
+    #[serde(default = "default_rerank_score_field")]
+    pub score_field: String,
+
+    /// Query mode for reranking
+    #[serde(default = "default_rerank_query_mode")]
+    pub query_mode: String,
+}
+
+impl Default for RerankerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_rerank_enabled(),
+            model: ModelConfig::HuggingFace(HuggingFaceModelConfig {
+                repo_id: "BAAI/bge-reranker-base".to_string(),
+                revision: "main".to_string(),
+                files: vec![
+                    "onnx/model.onnx".to_string(),
+                    "tokenizer.json".to_string(),
+                ],
+            }),
+            top_m: default_rerank_top_m(),
+            score_field: default_rerank_score_field(),
+            query_mode: default_rerank_query_mode(),
+        }
+    }
+}
+
+/// Default value for rerank enabled - false
+fn default_rerank_enabled() -> bool {
+    false
+}
+
+/// Default value for rerank top M - 30
+fn default_rerank_top_m() -> usize {
+    30
+}
+
+/// Default value for rerank score field - "relevance"
+fn default_rerank_score_field() -> String {
+    "relevance".to_string()
+}
+
+/// Default value for rerank query mode - "centroid_summary"
+fn default_rerank_query_mode() -> String {
+    "centroid_summary".to_string()
+}
+
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
@@ -122,7 +186,7 @@ impl AnalyzerConfig {
             mmr_lambda: 0.5,
             top_n: 10,
             rerank: false,
-            reranker_model_id: "".to_string(),
+            reranker: RerankerConfig::default(),
             allow_downloads: default_allow_downloads(),
             cache: CacheConfig::default(),
         }
@@ -152,7 +216,6 @@ impl AnalyzerConfig {
                         config.rerank = val;
                     }
                 }
-                "reranker_model_id" => config.reranker_model_id = value.clone(),
                 "allow_downloads" => {
                     if let Ok(val) = value.parse::<bool>() {
                         config.allow_downloads = val;
@@ -207,7 +270,6 @@ mod tests {
         assert_eq!(config.mmr_lambda, 0.5);
         assert_eq!(config.top_n, 10);
         assert_eq!(config.rerank, false);
-        assert_eq!(config.reranker_model_id, "");
 
         // Check HF model config
         match &config.model {
@@ -251,7 +313,6 @@ mod tests {
         core_settings.insert("mmr_lambda".to_string(), "0.7".to_string());
         core_settings.insert("top_n".to_string(), "15".to_string());
         core_settings.insert("rerank".to_string(), "true".to_string());
-        core_settings.insert("reranker_model_id".to_string(), "my-reranker".to_string());
 
         let core_config = CoreConfig {
             settings: core_settings,
@@ -262,6 +323,5 @@ mod tests {
         assert_eq!(config.mmr_lambda, 0.7);
         assert_eq!(config.top_n, 15);
         assert_eq!(config.rerank, true);
-        assert_eq!(config.reranker_model_id, "my-reranker");
     }
 }

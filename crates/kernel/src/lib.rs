@@ -62,6 +62,9 @@ pub struct SegmentScore {
     pub score_representative: f32,
     /// Score for diversity (MMR term)
     pub score_diversity: f32,
+    /// Score from reranker (if used)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score_rerank: Option<f32>,
     /// Reason for selection
     pub reason: String,
 }
@@ -254,6 +257,7 @@ mod tests {
                 segment_id: "seg123".to_string(),
                 score_representative: 0.95,
                 score_diversity: 0.85,
+                score_rerank: Some(0.92),
                 reason: "Highly central".to_string(),
             }],
             metrics: AnalysisMetrics {

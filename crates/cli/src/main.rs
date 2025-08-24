@@ -35,6 +35,14 @@ enum Commands {
         #[clap(long, default_value = "0.65")]
         mmr_lambda: f32,
 
+        /// Enable reranking
+        #[clap(long)]
+        rerank: bool,
+
+        /// Number of top segments to consider for reranking
+        #[clap(long, default_value = "30")]
+        rerank_top_m: usize,
+
         /// Batch size for inference
         #[clap(long, default_value = "8")]
         batch_size: usize,
@@ -86,6 +94,14 @@ enum Commands {
         #[clap(long, default_value = "0.65")]
         mmr_lambda: f32,
 
+        /// Enable reranking
+        #[clap(long)]
+        rerank: bool,
+
+        /// Number of top segments to consider for reranking
+        #[clap(long, default_value = "30")]
+        rerank_top_m: usize,
+
         /// Style of summary to generate
         #[clap(long, default_value = "abstract_with_bullets")]
         style: String,
@@ -129,6 +145,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             path,
             top_n,
             mmr_lambda,
+            rerank,
+            rerank_top_m,
             batch_size,
             max_seq_len,
             output,
@@ -137,6 +155,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 path,
                 *top_n,
                 *mmr_lambda,
+                *rerank,
+                *rerank_top_m,
                 *batch_size,
                 *max_seq_len,
                 output.as_deref(),
@@ -157,11 +177,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             out_dir,
             top_n,
             mmr_lambda,
+            rerank,
+            rerank_top_m,
             style,
             timeout_ms,
             config: _config,
         } => {
-            run_pipeline(url, out_dir, *top_n, *mmr_lambda, style, *timeout_ms).await?;
+            run_pipeline(url, out_dir, *top_n, *mmr_lambda, *rerank, *rerank_top_m, style, *timeout_ms).await?;
         }
         Commands::Cache { subcommand } => match subcommand {
             CacheCommands::Stats => {
@@ -180,6 +202,8 @@ async fn analyze_document(
     path: &str,
     top_n: usize,
     mmr_lambda: f32,
+    rerank: bool,
+    rerank_top_m: usize,
     batch_size: usize,
     max_seq_len: usize,
     output: Option<&str>,
@@ -192,7 +216,7 @@ async fn analyze_document(
     let document: Document = serde_json::from_reader(reader)?;
 
     // Create analyzer configuration
-    let config = analyzer::config::AnalyzerConfig {
+    let mut config = analyzer::config::AnalyzerConfig {
         backend: "onnx".to_string(),
         model: analyzer::config::ModelConfig::HuggingFace(
             analyzer::config::HuggingFaceModelConfig {
@@ -207,11 +231,29 @@ async fn analyze_document(
         ),
         mmr_lambda,
         top_n,
-        rerank: false,
-        reranker_model_id: "".to_string(),
+        rerank,
+        reranker: analyzer::config::RerankerConfig {
+            enabled: rerank,
+            top_m: rerank_top_m,
+            ..Default::default()
+        },
         allow_downloads: true,
         cache: analyzer::config::CacheConfig::default(),
     };
+
+    // If rerank is enabled, update the reranker model config
+    if rerank {
+        config.reranker.model = analyzer::config::ModelConfig::HuggingFace(
+            analyzer::config::HuggingFaceModelConfig {
+                repo_id: "BAAI/bge-reranker-base".to_string(),
+                revision: "main".to_string(),
+                files: vec![
+                    "onnx/model.onnx".to_string(),
+                    "tokenizer.json".to_string(),
+                ],
+            },
+        );
+    }
 
     // Create analyzer
     let mut analyzer = analyzer::Analyzer::new(config).await?;
@@ -221,6 +263,12 @@ async fn analyze_document(
     println!("Embedding dimension: 384");
     println!("Batch size: {}", batch_size);
     println!("Max sequence length: {}", max_seq_len);
+    if rerank {
+        println!("Rerank enabled: true");
+        println!("Rerank top M: {}", rerank_top_m);
+    } else {
+        println!("Rerank enabled: false");
+    }
 
     // Record start time
     let start_time = std::time::Instant::now();
@@ -330,6 +378,8 @@ async fn run_pipeline(
     out_dir: &str,
     top_n: usize,
     mmr_lambda: f32,
+    rerank: bool,
+    rerank_top_m: usize,
     style: &str,
     timeout_ms: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -339,6 +389,12 @@ async fn run_pipeline(
     println!("Output directory: {}", out_dir);
     println!("Top N segments: {}", top_n);
     println!("MMR lambda: {}", mmr_lambda);
+    if rerank {
+        println!("Rerank enabled: true");
+        println!("Rerank top M: {}", rerank_top_m);
+    } else {
+        println!("Rerank enabled: false");
+    }
     println!("Summary style: {}", style);
     println!("API timeout: {} ms", timeout_ms);
 
@@ -374,7 +430,7 @@ async fn run_pipeline(
     let analyze_start = std::time::Instant::now();
 
     // Create analyzer configuration
-    let analyzer_config = analyzer::config::AnalyzerConfig {
+    let mut analyzer_config = analyzer::config::AnalyzerConfig {
         backend: "onnx".to_string(),
         model: analyzer::config::ModelConfig::HuggingFace(
             analyzer::config::HuggingFaceModelConfig {
@@ -389,11 +445,29 @@ async fn run_pipeline(
         ),
         mmr_lambda,
         top_n,
-        rerank: false,
-        reranker_model_id: "".to_string(),
+        rerank,
+        reranker: analyzer::config::RerankerConfig {
+            enabled: rerank,
+            top_m: rerank_top_m,
+            ..Default::default()
+        },
         allow_downloads: true,
         cache: analyzer::config::CacheConfig::default(),
     };
+
+    // If rerank is enabled, update the reranker model config
+    if rerank {
+        analyzer_config.reranker.model = analyzer::config::ModelConfig::HuggingFace(
+            analyzer::config::HuggingFaceModelConfig {
+                repo_id: "BAAI/bge-reranker-base".to_string(),
+                revision: "main".to_string(),
+                files: vec![
+                    "onnx/model.onnx".to_string(),
+                    "tokenizer.json".to_string(),
+                ],
+            },
+        );
+    }
 
     // Create analyzer
     let mut analyzer = analyzer::Analyzer::new(analyzer_config).await?;
@@ -401,6 +475,10 @@ async fn run_pipeline(
     // Log model info
     println!("Model ID: {}", analyzer.model_fingerprint());
     println!("Embedding dimension: 384");
+    if rerank {
+        println!("Rerank enabled: true");
+        println!("Rerank top M: {}", rerank_top_m);
+    }
 
     // Analyze document
     let analysis_response = analyzer.analyze(&document)?;

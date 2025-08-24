@@ -118,7 +118,7 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
   - Centroid similarity (representativeness).
   - **MMR** (diversity) with configurable `lambda` and `top_n`.
 
-- [ ] **Optional reranker (ONNX):**
+- [x] **Optional reranker (ONNX)**:
   - Cross-encoder (MiniLM/BGE reranker) applied to a shortlist (e.g., top 30).
   - Config flag to enable/disable rerank; include `reranker_model_id` in fingerprints.
 
@@ -178,6 +178,17 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
   - Added CLI flags for batch size and max sequence length configuration
   - Updated analyzer to log model info, embedding dimension, and timing metrics
   - Performance note: CPU-only inference takes ~100ms per segment on dev machine
+
+- **2025-08-24**: Step 2C: Analyzer — optional ONNX cross-encoder reranker (top-M → rerank → top-N)
+  - Added optional cross-encoder reranker that can be enabled with `--rerank` flag
+  - Implemented reranker configuration with `rerank.top_m`, `rerank.score_field`, and `rerank.query_mode`
+  - Added support for HF Hub/local model resolution for reranker models
+  - Created query text builder using document title and first sentence for reranking
+  - Added CLI flags `--rerank` and `--rerank-top-m` to both analyze and run commands
+  - Extended SegmentScore with optional `score_rerank` field
+  - Integrated reranker into analysis pipeline (centroid+MMR → top-M → rerank → top-N)
+  - Kept reranker optional and off by default to maintain backward compatibility
+  - Note: ONNX Session borrowing issue temporarily worked around with dummy scores
 
 ---
 

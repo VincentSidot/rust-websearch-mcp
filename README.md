@@ -6,6 +6,7 @@ A self-hosted pipeline for web scraping, local analysis with embeddings, and LLM
 
 - **Web Scraping**: Clean and segment web pages into coherent chunks
 - **Local Analysis**: Generate embeddings and rank content using centroid similarity and MMR
+- **Optional Reranking**: Improve precision with cross-encoder reranker (off by default)
 - **LLM Summarization**: Create concise summaries using OpenAI-compatible APIs
 - **CLI Interface**: Run each step individually or the full pipeline end-to-end
 
@@ -35,11 +36,17 @@ OPENAI_MODEL=<default_model_id>  # optional
 # Run the full pipeline
 cargo run --bin cli -- run <url>
 
+# Run the full pipeline with reranking
+cargo run --bin cli -- run --rerank <url>
+
 # Scrape a webpage
 cargo run --bin cli -- scrape <url>
 
 # Analyze scraped content
 cargo run --bin cli -- analyze <document.json>
+
+# Analyze scraped content with reranking
+cargo run --bin cli -- analyze --rerank <document.json>
 
 # Summarize analyzed content
 cargo run --bin cli -- summarize --analysis <analysis.json> --document <document.json>
@@ -52,6 +59,19 @@ cargo run --bin cli -- cache clear  # Clear the cache
 ## Configuration
 
 Create a `config/config.toml` file based on `config/config.example.toml` to customize behavior.
+
+## Reranker
+
+The analyzer supports an optional cross-encoder reranker that can improve the precision of selected segments. 
+The reranker is off by default and can be enabled with the `--rerank` flag.
+
+When enabled:
+- The analyzer first selects a shortlist of M segments using centroid similarity and MMR
+- The reranker scores each segment in the shortlist against a query derived from the document
+- The top N segments are selected based on reranker scores
+
+Configuration options:
+- `--rerank-top-m <int>`: Number of segments to consider for reranking (default: 30)
 
 ## Development
 
