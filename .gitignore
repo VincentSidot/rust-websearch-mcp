@@ -1,2 +1,10 @@
+# Rust compilation stuffs
 /target
+
+# Project secrets
 .env
+.qwen.env
+
+# Project related directories
+./test_out
+./test-out
