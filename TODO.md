@@ -190,6 +190,20 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
   - Kept reranker optional and off by default to maintain backward compatibility
   - Note: ONNX Session borrowing issue temporarily worked around with dummy scores
 
+- **2025-08-24**: Step 2C.1: Reranker — real ONNX inference, joint tokenization, batching, stable session
+  - Replaced dummy scores with real cross-encoder outputs from ONNX inference
+  - Implemented joint tokenization `[query] [SEP] [candidate]` matching the model requirements
+  - Added support for batched inference over the top-M shortlist with proper tensor handling
+  - Fixed ONNX session borrowing issues by using Arc-wrapped session for thread-safe access
+  - Configured ONNX intra/inter-op threads via config to prevent oversubscription
+  - Implemented deterministic truncation policy: prefer truncating the candidate tail if needed
+  - Added proper score extraction from configured tensor index (logits[0] by default)
+  - Added stable tie-breaking in rerank sort (equal scores maintain original order)
+  - Enhanced logging with model fingerprint, M and N sizes, stage timing, and top-5 score preview
+  - Updated configuration surface with fields: `rerank.intra_op_threads`, `rerank.inter_op_threads`, `rerank.max_seq_len`, `rerank.truncation`, `rerank.score_tensor`
+  - Verified reranker produces real ONNX-derived scores and reorders the shortlist to final top-N
+  - Confirmed backward compatibility when reranker is disabled (identical output to pre-reranker runs)
+
 ---
 
 ## 3) Summarizer Crate

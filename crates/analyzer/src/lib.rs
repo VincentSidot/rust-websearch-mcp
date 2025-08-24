@@ -8,6 +8,7 @@
 pub mod cache;
 pub mod config;
 pub mod model;
+mod reranker_test;
 
 use cache::EmbeddingCache;
 use config::{AnalyzerConfig, RerankerConfig};
@@ -31,8 +32,11 @@ pub struct Analyzer {
     /// Tokenizer for the embedding model
     tokenizer: Tokenizer,
 
-    /// Maximum sequence length
+    /// Maximum sequence length for embedder
     max_seq_len: usize,
+
+    /// Maximum sequence length for reranker
+    reranker_max_seq_len: usize,
 
     /// Embedding cache
     cache: EmbeddingCache,
@@ -160,7 +164,17 @@ impl Analyzer {
                     .map_err(|e| format!("Failed to load reranker tokenizer: {}", e))?;
 
                 // Create ONNX Runtime environment and session for reranker
-                let reranker_session = Session::builder()?.commit_from_file(reranker_model_path)?;
+                let mut session_builder = Session::builder()?;
+                
+                // Configure threading if specified
+                if config.reranker.intra_op_threads > 0 {
+                    session_builder = session_builder.with_intra_threads(config.reranker.intra_op_threads)?;
+                }
+                if config.reranker.inter_op_threads > 0 {
+                    session_builder = session_builder.with_inter_threads(config.reranker.inter_op_threads)?;
+                }
+                
+                let reranker_session = session_builder.commit_from_file(reranker_model_path)?;
 
                 // Get reranker model fingerprint
                 let reranker_model_fingerprint = resolved_reranker_model.fingerprint;
@@ -177,7 +191,8 @@ impl Analyzer {
 
         // Set batch size and max sequence length from config or defaults
         let _batch_size = 8; // Default batch size (no longer used)
-        let max_seq_len = 512; // Default max sequence length
+        let max_seq_len = 512; // Default max sequence length for embedder
+        let reranker_max_seq_len = config.reranker.max_seq_len; // Use reranker max sequence length
 
         info!("Analyzer initialized successfully");
 
@@ -191,6 +206,7 @@ impl Analyzer {
             reranker_session,
             reranker_tokenizer,
             reranker_model_fingerprint,
+            reranker_max_seq_len,
         })
     }
 
@@ -489,9 +505,9 @@ impl Analyzer {
             return Err("Reranker not enabled".into());
         }
 
-        let _reranker_session = self
+        let reranker_session = self
             .reranker_session
-            .as_ref()
+            .as_mut()
             .ok_or("Reranker session not initialized")?;
         let reranker_tokenizer = self
             .reranker_tokenizer
@@ -507,28 +523,30 @@ impl Analyzer {
         // Record start time
         let start_time = std::time::Instant::now();
 
-        // Create pairs of (query, segment_text)
+        // Create pairs of (query, segment_text) with proper truncation policy
         let pairs: Vec<(&str, &str)> = segments
             .iter()
             .map(|segment| (query, segment.text.as_str()))
             .collect();
 
-        // Tokenize pairs
+        // Tokenize pairs with proper truncation (truncating candidate tail if needed)
         let encodings = reranker_tokenizer
             .encode_batch(pairs.clone(), true)
             .map_err(|e| format!("Reranker tokenization failed: {}", e))?;
 
-        // Convert to input tensors
+        // Convert to input tensors with proper truncation
         let input_ids: Vec<Vec<i64>> = encodings
             .iter()
             .map(|encoding| {
                 let ids = encoding.get_ids();
                 // Truncate or pad to max_seq_len
-                if ids.len() > self.max_seq_len {
-                    ids[..self.max_seq_len].iter().map(|&x| x as i64).collect()
+                // Apply truncation policy: prefer truncating the candidate tail if needed
+                if ids.len() > self.reranker_max_seq_len {
+                    // Truncate from the end (candidate tail truncation)
+                    ids[..self.reranker_max_seq_len].iter().map(|&x| x as i64).collect()
                 } else {
                     let mut padded: Vec<i64> = ids.iter().map(|&x| x as i64).collect();
-                    padded.resize(self.max_seq_len, 0);
+                    padded.resize(self.reranker_max_seq_len, 0);
                     padded
                 }
             })
@@ -546,35 +564,76 @@ impl Analyzer {
         // Stack into batched tensors
         let batch_size = input_ids.len();
         let input_ids_array = ndarray::Array2::from_shape_vec(
-            (batch_size, self.max_seq_len),
+            (batch_size, self.reranker_max_seq_len),
             input_ids.into_iter().flatten().collect(),
         )?;
 
         let attention_mask_array = ndarray::Array2::from_shape_vec(
-            (batch_size, self.max_seq_len),
+            (batch_size, self.reranker_max_seq_len),
             attention_mask.into_iter().flatten().collect(),
         )?;
 
-        // Run inference
+        // Run inference with proper tensor handling
         let scores = {
             // Convert to i64 for ONNX Runtime
-            let _input_ids_i64: Vec<i64> = input_ids_array.iter().map(|&x| x as i64).collect();
-            let _attention_mask_i64: Vec<i64> =
+            let input_ids_i64: Vec<i64> = input_ids_array.iter().map(|&x| x as i64).collect();
+            let attention_mask_i64: Vec<i64> =
                 attention_mask_array.iter().map(|&x| x as i64).collect();
 
-            let _input_ids_value =
-                ort::value::Value::from_array((input_ids_array.shape(), _input_ids_i64))?;
-            let _attention_mask_value =
-                ort::value::Value::from_array((attention_mask_array.shape(), _attention_mask_i64))?;
+            let input_ids_value =
+                ort::value::Value::from_array((input_ids_array.shape(), input_ids_i64))?;
+            let attention_mask_value =
+                ort::value::Value::from_array((attention_mask_array.shape(), attention_mask_i64))?;
 
-            // TODO: Fix the borrowing issue with reranker_session.run()
-            // For now, return dummy scores
-            vec![0.5; segments.len()]
+            // Use the session directly
+            let outputs = reranker_session.run(ort::inputs![
+                "input_ids" => input_ids_value,
+                "attention_mask" => attention_mask_value
+            ])?;
+
+            // Extract scores from the output tensor based on config
+            let (shape, data) = outputs[0].try_extract_tensor::<f32>()?;
+            
+            // Extract the relevance score based on the configured tensor index
+            let scores: Vec<f32> = match self.config.reranker.score_tensor.as_str() {
+                "logits[0]" => {
+                    data.chunks(shape[1] as usize)
+                        .map(|chunk| chunk[0]) // Take first element as relevance score
+                        .collect()
+                }
+                _ => {
+                    // Default to logits[0] if unknown
+                    data.chunks(shape[1] as usize)
+                        .map(|chunk| chunk[0])
+                        .collect()
+                }
+            };
+            
+            scores
         };
 
         // Record end time
         let duration = start_time.elapsed();
         info!("Reranking completed in {:?}", duration);
+
+        // Log top 5 scores for debugging (just indices and scores, no content)
+        let mut indexed_scores_preview: Vec<(usize, f32)> = segments
+            .iter()
+            .enumerate()
+            .map(|(i, _segment)| (i, scores[i]))
+            .collect();
+        
+        // Sort by score descending for preview
+        indexed_scores_preview.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        
+        // Log top 5 scores
+        let top_5_preview: Vec<(usize, f32)> = indexed_scores_preview
+            .iter()
+            .take(5)
+            .map(|(idx, score)| (*idx, *score))
+            .collect();
+        
+        info!("Top 5 rerank scores (index, score): {:?}", top_5_preview);
 
         // Create index-score pairs and sort by score (descending)
         let mut indexed_scores: Vec<(usize, f32)> = segments
@@ -583,8 +642,12 @@ impl Analyzer {
             .map(|(i, _)| (i, scores[i]))
             .collect();
 
-        // Sort by score descending
-        indexed_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // Sort by score descending with stable tie-breaking
+        indexed_scores.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.cmp(&b.0)) // Stable tie-breaking by index
+        });
 
         Ok(indexed_scores)
     }

@@ -111,6 +111,22 @@ pub struct RerankerConfig {
     /// Query mode for reranking
     #[serde(default = "default_rerank_query_mode")]
     pub query_mode: String,
+
+    /// Maximum sequence length for reranker
+    #[serde(default = "default_rerank_max_seq_len")]
+    pub max_seq_len: usize,
+
+    /// Number of intra-op threads for ONNX Runtime
+    #[serde(default = "default_rerank_intra_op_threads")]
+    pub intra_op_threads: usize,
+
+    /// Number of inter-op threads for ONNX Runtime
+    #[serde(default = "default_rerank_inter_op_threads")]
+    pub inter_op_threads: usize,
+
+    /// Which tensor/logit to use for scoring
+    #[serde(default = "default_rerank_score_tensor")]
+    pub score_tensor: String,
 }
 
 impl Default for RerankerConfig {
@@ -125,6 +141,10 @@ impl Default for RerankerConfig {
             top_m: default_rerank_top_m(),
             score_field: default_rerank_score_field(),
             query_mode: default_rerank_query_mode(),
+            max_seq_len: default_rerank_max_seq_len(),
+            intra_op_threads: default_rerank_intra_op_threads(),
+            inter_op_threads: default_rerank_inter_op_threads(),
+            score_tensor: default_rerank_score_tensor(),
         }
     }
 }
@@ -147,6 +167,26 @@ fn default_rerank_score_field() -> String {
 /// Default value for rerank query mode - "centroid_summary"
 fn default_rerank_query_mode() -> String {
     "centroid_summary".to_string()
+}
+
+/// Default value for rerank max sequence length - 512
+fn default_rerank_max_seq_len() -> usize {
+    512
+}
+
+/// Default value for rerank intra-op threads - 0 (let ONNX decide)
+fn default_rerank_intra_op_threads() -> usize {
+    0
+}
+
+/// Default value for rerank inter-op threads - 0 (let ONNX decide)
+fn default_rerank_inter_op_threads() -> usize {
+    0
+}
+
+/// Default value for rerank score tensor - "logits[0]"
+fn default_rerank_score_tensor() -> String {
+    "logits[0]".to_string()
 }
 
 impl Default for CacheConfig {
