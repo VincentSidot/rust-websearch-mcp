@@ -77,7 +77,7 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
+    logger::init_logger();
 
     if let Err(err) = dotenv() {
         log::warn!("An error occured while loading .env file: {err}");

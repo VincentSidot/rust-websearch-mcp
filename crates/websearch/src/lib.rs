@@ -5,7 +5,11 @@ use std::error::Error;
 
 pub mod config;
 pub mod formatter;
-pub mod logger;
+
+#[cfg(feature = "logger")]
+pub mod logger {
+    pub use logger::*;
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ScrapeRequest {
@@ -54,6 +58,7 @@ pub struct ErrorResponse {
 /// }
 /// ```
 pub async fn scrape_webpage(url: &str) -> Result<ScrapeResponse, Box<dyn Error>> {
+    #[cfg(feature = "logger")]
     logger::log_scraping_start(url);
 
     // Create a client with a proper user-agent header
@@ -80,6 +85,7 @@ pub async fn scrape_webpage(url: &str) -> Result<ScrapeResponse, Box<dyn Error>>
     // Extract text content with better filtering for Wikipedia
     let text_content = extract_text_content(&document);
 
+    #[cfg(feature = "logger")]
     logger::log_scraping_complete(url, title.as_ref());
 
     Ok(ScrapeResponse {

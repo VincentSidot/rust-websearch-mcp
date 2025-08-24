@@ -28,6 +28,7 @@ dirs = "5.0"
 
 # Logging
 log = "0.4"
+logger = { path = "../logger" }
 
 # Path manipulation
 path-slash = "0.2"
