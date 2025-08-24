@@ -164,6 +164,20 @@ cargo test -p websearch
 cargo test -p analyzer
 ```
 
+### GitHub Actions
+
+This project uses GitHub Actions for continuous integration:
+
+- **CI Workflow**: Runs on every push and pull request to the main branch
+  - Checks code formatting with `cargo fmt`
+  - Runs Clippy for linting
+  - Runs tests on Linux, Windows, and macOS
+  - Builds release binaries
+
+- **Documentation Workflow**: Builds and deploys documentation to GitHub Pages
+
+- **Dependabot**: Automatically creates pull requests for dependency updates
+
 ## Project Structure
 
 ```
