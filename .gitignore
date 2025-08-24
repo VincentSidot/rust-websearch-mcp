@@ -6,5 +6,5 @@
 .qwen.env
 
 # Project related directories
-./test_out
-./test-out
+/test_out
+/test-out
