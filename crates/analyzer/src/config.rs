@@ -32,6 +32,10 @@ pub struct AnalyzerConfig {
     /// Whether to allow network downloads
     #[serde(default = "default_allow_downloads")]
     pub allow_downloads: bool,
+
+    /// Cache configuration
+    #[serde(default)]
+    pub cache: CacheConfig,
 }
 
 /// Configuration for model loading
@@ -65,6 +69,42 @@ pub struct LocalModelConfig {
     pub model_dir: String,
 }
 
+/// Configuration for caching
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CacheConfig {
+    /// Whether caching is enabled
+    #[serde(default = "default_cache_enabled")]
+    pub enabled: bool,
+
+    /// Path to the cache directory
+    #[serde(default = "default_cache_path")]
+    pub path: String,
+
+    /// Time-to-live for cache entries in days (optional)
+    #[serde(default)]
+    pub ttl_days: Option<u32>,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_cache_enabled(),
+            path: default_cache_path(),
+            ttl_days: None,
+        }
+    }
+}
+
+/// Default value for cache enabled - true
+fn default_cache_enabled() -> bool {
+    true
+}
+
+/// Default value for cache path - "./.cache/analyzer"
+fn default_cache_path() -> String {
+    "./.cache/analyzer".to_string()
+}
+
 impl AnalyzerConfig {
     /// Create a new AnalyzerConfig with default values
     pub fn new() -> Self {
@@ -84,6 +124,7 @@ impl AnalyzerConfig {
             rerank: false,
             reranker_model_id: "".to_string(),
             allow_downloads: default_allow_downloads(),
+            cache: CacheConfig::default(),
         }
     }
 

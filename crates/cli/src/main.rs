@@ -98,6 +98,19 @@ enum Commands {
         #[clap(long)]
         config: Option<String>,
     },
+    /// Cache management commands
+    Cache {
+        #[clap(subcommand)]
+        subcommand: CacheCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum CacheCommands {
+    /// Show cache statistics
+    Stats,
+    /// Clear the cache
+    Clear,
 }
 
 #[tokio::main]
@@ -150,6 +163,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             run_pipeline(url, out_dir, *top_n, *mmr_lambda, style, *timeout_ms).await?;
         }
+        Commands::Cache { subcommand } => match subcommand {
+            CacheCommands::Stats => {
+                cache_stats().await?;
+            }
+            CacheCommands::Clear => {
+                cache_clear().await?;
+            }
+        }
     }
 
     Ok(())
@@ -189,6 +210,7 @@ async fn analyze_document(
         rerank: false,
         reranker_model_id: "".to_string(),
         allow_downloads: true,
+        cache: analyzer::config::CacheConfig::default(),
     };
 
     // Create analyzer
@@ -370,6 +392,7 @@ async fn run_pipeline(
         rerank: false,
         reranker_model_id: "".to_string(),
         allow_downloads: true,
+        cache: analyzer::config::CacheConfig::default(),
     };
 
     // Create analyzer
@@ -480,5 +503,39 @@ async fn run_pipeline(
     println!("  Analysis:  {}", analysis_path.display());
     println!("  Summary:   {}", summary_path.display());
 
+    Ok(())
+}
+
+/// Show cache statistics
+async fn cache_stats() -> Result<(), Box<dyn std::error::Error>> {
+    // Create default analyzer config to get cache path
+    let config = analyzer::config::AnalyzerConfig::new();
+    
+    // Initialize cache
+    let cache = analyzer::cache::EmbeddingCache::new(config.cache)?;
+    
+    // Get stats
+    let stats = cache.get_stats()?;
+    
+    println!("Cache Statistics:");
+    println!("  Entry Count: {}", stats.entry_count);
+    println!("  Estimated Size: {} bytes", stats.total_size_bytes);
+    
+    Ok(())
+}
+
+/// Clear the cache
+async fn cache_clear() -> Result<(), Box<dyn std::error::Error>> {
+    // Create default analyzer config to get cache path
+    let config = analyzer::config::AnalyzerConfig::new();
+    
+    // Initialize cache
+    let cache = analyzer::cache::EmbeddingCache::new(config.cache)?;
+    
+    // Clear cache
+    cache.clear()?;
+    
+    println!("Cache cleared successfully");
+    
     Ok(())
 }

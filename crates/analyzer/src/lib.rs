@@ -5,9 +5,11 @@
 //! - Generating embeddings for document segments
 //! - Ranking segments using centroid similarity and MMR
 
+pub mod cache;
 pub mod config;
 pub mod model;
 
+use cache::EmbeddingCache;
 use config::AnalyzerConfig;
 use kernel::{AnalysisMetrics, AnalyzeResponse, Document, SegmentScore};
 use log::{debug, info};
@@ -29,11 +31,11 @@ pub struct Analyzer {
     /// Tokenizer for the embedding model
     tokenizer: Tokenizer,
 
-    /// Batch size for inference
-    batch_size: usize,
-
     /// Maximum sequence length
     max_seq_len: usize,
+
+    /// Embedding cache
+    cache: EmbeddingCache,
 }
 
 impl Analyzer {
@@ -41,6 +43,10 @@ impl Analyzer {
     pub async fn new(config: AnalyzerConfig) -> Result<Self, Box<dyn std::error::Error>> {
         Self::ensure_ort_loaded_on_windows(); // Ensure windows linked well
         info!("Initializing analyzer with config: {:?}", config);
+
+        // Initialize cache
+        let cache = EmbeddingCache::new(config.cache.clone())?;
+        info!("Initialized embedding cache");
 
         // Resolve model files
         let resolved_model = model::resolve_model(&config).await?;
@@ -78,7 +84,7 @@ impl Analyzer {
         info!("Model fingerprint: {}", model_fingerprint);
 
         // Set batch size and max sequence length from config or defaults
-        let batch_size = 8; // Default batch size
+        let _batch_size = 8; // Default batch size (no longer used)
         let max_seq_len = 512; // Default max sequence length
 
         info!("Analyzer initialized successfully");
@@ -88,8 +94,8 @@ impl Analyzer {
             model_fingerprint,
             session,
             tokenizer,
-            batch_size,
             max_seq_len,
+            cache,
         })
     }
 
@@ -124,17 +130,25 @@ impl Analyzer {
         document: &Document,
     ) -> Result<AnalyzeResponse, Box<dyn std::error::Error>> {
         info!("Analyzing document: {}", document.doc_id);
+        
+        // Reset cache counters for this run
+        self.cache.reset_counters();
 
-        // Extract texts from segments
-        let texts: Vec<&str> = document.segments.iter().map(|s| s.text.as_str()).collect();
-        debug!("Processing {} segments", texts.len());
-
-        // Generate embeddings for all segments in batches
-        let embeddings = self.generate_embeddings_batched(&texts)?;
+        // Generate embeddings for all segments (with caching)
+        let embeddings = self.generate_segment_embeddings(document)?;
         debug!(
             "Generated embeddings with shape: ({}, {})",
             embeddings.nrows(),
             embeddings.ncols()
+        );
+
+        // Report cache statistics
+        let (hits, misses, ratio) = self.cache.get_hit_miss_stats();
+        info!(
+            "Embedding cache stats - Hits: {}, Misses: {}, Hit Ratio: {:.2}%",
+            hits,
+            misses,
+            ratio * 100.0
         );
 
         // Compute centroid
@@ -211,32 +225,64 @@ impl Analyzer {
         Ok(response)
     }
 
-    /// Generate embeddings for a batch of texts using ONNX model
-    fn generate_embeddings_batched(
+    /// Generate embeddings for all segments in a document (with caching)
+    fn generate_segment_embeddings(
         &mut self,
-        texts: &[&str],
+        document: &Document,
     ) -> Result<ndarray::Array2<f32>, Box<dyn std::error::Error>> {
         info!(
-            "Generating embeddings for {} texts in batches of {}",
-            texts.len(),
-            self.batch_size
+            "Generating embeddings for {} segments with caching",
+            document.segments.len()
         );
 
-        // Process texts in batches
+        // Process each segment individually with caching
         let mut all_embeddings = Vec::new();
 
-        for chunk in texts.chunks(self.batch_size) {
-            let batch_embeddings = self.generate_embeddings(chunk)?;
-            all_embeddings.push(batch_embeddings);
+        for segment in &document.segments {
+            // Try to get embedding from cache first
+            if let Some(cached_embedding) = self.cache.get_embedding(
+                &segment.segment_id,
+                &self.model_fingerprint,
+            )? {
+                debug!("Using cached embedding for segment: {}", segment.segment_id);
+                all_embeddings.push(cached_embedding);
+                continue;
+            }
+
+            // Generate embedding if not in cache
+            debug!("Generating embedding for segment: {}", segment.segment_id);
+            let embedding = self.generate_single_embedding(&segment.text)?;
+            
+            // Cache the embedding
+            self.cache.put_embedding(
+                &segment.segment_id,
+                &self.model_fingerprint,
+                &embedding,
+            )?;
+            
+            all_embeddings.push(embedding);
         }
 
-        // Concatenate all batch embeddings
-        let embeddings = ndarray::concatenate(
-            Axis(0),
-            &all_embeddings.iter().map(|a| a.view()).collect::<Vec<_>>(),
-        )?;
+        // Concatenate all embeddings
+        if all_embeddings.is_empty() {
+            Ok(Array2::zeros((0, 384)))
+        } else {
+            let embeddings = ndarray::concatenate(
+                Axis(0),
+                &all_embeddings.iter().map(|a| a.view()).collect::<Vec<_>>(),
+            )?;
+            Ok(embeddings)
+        }
+    }
 
-        Ok(embeddings)
+    /// Generate embedding for a single text using ONNX model
+    fn generate_single_embedding(
+        &mut self,
+        text: &str,
+    ) -> Result<ndarray::Array2<f32>, Box<dyn std::error::Error>> {
+        // Create a slice with the single text
+        let texts = [text];
+        self.generate_embeddings(&texts)
     }
 
     /// Generate embeddings for a batch of texts using ONNX model
