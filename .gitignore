@@ -8,3 +8,4 @@
 # Project related directories
 /test_out
 /test-out
+/.cache
