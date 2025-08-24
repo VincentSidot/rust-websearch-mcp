@@ -14,4 +14,4 @@ logger = { path = "../logger" }
 clap = { version = "4.0", features = ["derive"] }
 
 [dev-dependencies]
-warp = "0.3"
+warp = "0.4"
