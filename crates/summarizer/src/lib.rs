@@ -434,12 +434,14 @@ mod tests {
                     score_representative: 0.95,
                     score_diversity: 0.85,
                     reason: "Highly central".to_string(),
+                    score_rerank: None,
                 },
                 SegmentScore {
                     segment_id: "seg-2".to_string(),
                     score_representative: 0.85,
                     score_diversity: 0.75,
                     reason: "Diverse content".to_string(),
+                    score_rerank: None,
                 },
             ],
             metrics: kernel::AnalysisMetrics {

@@ -283,6 +283,7 @@ mod tests {
                 score_representative: 0.95,
                 score_diversity: 0.85,
                 reason: "Highly central".to_string(),
+                score_rerank: None,
             }],
             metrics: AnalysisMetrics {
                 num_segments: 10,

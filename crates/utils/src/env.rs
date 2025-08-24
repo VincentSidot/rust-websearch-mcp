@@ -7,6 +7,13 @@ pub fn load_env() {
     LOAD_ONCE.get_or_init(|| {
         if let Err(err) = {
             if let Some(env_file) = env::var_os("ENV_FILE") {
+                println!(
+                    "{} {}:{} - Loading custom env file from '{}'",
+                    "[INFO]".green(),
+                    file!(),
+                    line!(),
+                    env_file.display(),
+                );
                 dotenvy::from_filename(env_file)
             } else {
                 dotenvy::dotenv()
