@@ -1,16 +1,10 @@
+use chrono::Utc;
 use reqwest::Client;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
-use chrono::Utc;
 
-pub mod config;
 pub mod formatter;
-
-#[cfg(feature = "logger")]
-pub mod logger {
-    pub use logger::*;
-}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ScrapeRequest {
@@ -40,19 +34,23 @@ pub struct ErrorResponse {
 pub fn scraped_to_document(url: &str, scraped: &ScrapeResponse) -> core::Document {
     use core::{Document, Segment};
     use std::collections::HashMap;
-    
+
     // Get current timestamp in ISO 8601 format
     let fetched_at = Utc::now().to_rfc3339();
-    
+
     // Use the title from scraped data or derive from URL
     let title = scraped.title.clone().unwrap_or_else(|| {
         // Try to derive a title from the URL
         url.split('/').last().unwrap_or(url).to_string()
     });
-    
+
     // Split text content into segments (paragraphs)
-    let paragraphs: Vec<&str> = scraped.text_content.lines().filter(|line| !line.trim().is_empty()).collect();
-    
+    let paragraphs: Vec<&str> = scraped
+        .text_content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+
     // Create segments from paragraphs
     let segments: Vec<Segment> = paragraphs
         .iter()
@@ -62,10 +60,10 @@ pub fn scraped_to_document(url: &str, scraped: &ScrapeResponse) -> core::Documen
             if segment_text.is_empty() {
                 return None;
             }
-            
+
             // Create a segment ID based on the text content
             let segment_id = core::compute_segment_id(&segment_text);
-            
+
             Some(Segment {
                 segment_id,
                 text: segment_text,
@@ -75,11 +73,15 @@ pub fn scraped_to_document(url: &str, scraped: &ScrapeResponse) -> core::Documen
         })
         .flatten()
         .collect();
-    
+
     // Compute document ID based on content
-    let content_for_id = segments.iter().map(|s| s.text.clone()).collect::<Vec<_>>().join("\n");
+    let content_for_id = segments
+        .iter()
+        .map(|s| s.text.clone())
+        .collect::<Vec<_>>()
+        .join("\n");
     let doc_id = core::compute_doc_id(&content_for_id, "paragraphs", "websearch");
-    
+
     Document {
         schema_version: core::SCHEMA_VERSION.to_string(),
         doc_id,
@@ -115,9 +117,6 @@ pub fn scraped_to_document(url: &str, scraped: &ScrapeResponse) -> core::Documen
 /// }
 /// ```
 pub async fn scrape_webpage(url: &str) -> Result<ScrapeResponse, Box<dyn Error>> {
-    #[cfg(feature = "logger")]
-    logger::log_scraping_start(url);
-
     // Create a client with a proper user-agent header
     let client = Client::builder()
         .user_agent("websearch/0.1 (https://github.com/your-username/rust-websearch-mcp)")
@@ -141,9 +140,6 @@ pub async fn scrape_webpage(url: &str) -> Result<ScrapeResponse, Box<dyn Error>>
 
     // Extract text content with better filtering for Wikipedia
     let text_content = extract_text_content(&document);
-
-    #[cfg(feature = "logger")]
-    logger::log_scraping_complete(url, title.as_ref());
 
     Ok(ScrapeResponse {
         title,

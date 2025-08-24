@@ -103,17 +103,12 @@ impl Summarizer {
                     input_tokens: estimate_tokens(&prompt),
                     output_tokens: estimate_tokens(&summary_text),
                 };
-                (
-                    summary_text,
-                    bullets,
-                    Some(citations),
-                    None,
-                    metrics,
-                )
+                (summary_text, bullets, Some(citations), None, metrics)
             }
             Err(e) => {
                 warn!("API call failed: {}. Using extractive fallback.", e);
-                let (summary_text, metrics) = self.extractive_fallback(&selected_segments, start_time);
+                let (summary_text, metrics) =
+                    self.extractive_fallback(&selected_segments, start_time);
                 (
                     summary_text,
                     None, // No bullets in extractive fallback
@@ -197,7 +192,8 @@ impl Summarizer {
             SummaryStyle::AbstractWithBullets => {
                 prompt.push_str("\nInstructions:\n");
                 prompt.push_str("Please provide a concise summary of the selected passages above in 150-250 words.\n");
-                prompt.push_str("Also include 3-6 bullet points highlighting the key information.\n");
+                prompt
+                    .push_str("Also include 3-6 bullet points highlighting the key information.\n");
                 prompt.push_str("Do not include any information that is not present in the selected passages.\n");
                 prompt.push_str("Cite the passage numbers inline or list the sources used.\n");
                 prompt.push_str("If there is insufficient information to create a meaningful summary, please include a short \"Not in sources\" note.\n");
@@ -235,7 +231,10 @@ impl Summarizer {
         };
 
         // Build the API URL
-        let api_url = format!("{}/chat/completions", self.config.base_url.trim_end_matches('/'));
+        let api_url = format!(
+            "{}/chat/completions",
+            self.config.base_url.trim_end_matches('/')
+        );
 
         // Prepare headers
         let mut headers = reqwest::header::HeaderMap::new();
@@ -245,10 +244,7 @@ impl Summarizer {
                 format!("Bearer {}", api_key).parse()?,
             );
         }
-        headers.insert(
-            reqwest::header::CONTENT_TYPE,
-            "application/json".parse()?,
-        );
+        headers.insert(reqwest::header::CONTENT_TYPE, "application/json".parse()?);
 
         // Make the API call with timeout
         let timeout_duration = Duration::from_millis(self.config.timeout_ms);
@@ -273,7 +269,9 @@ impl Summarizer {
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(format!("API request failed with status {}: {}", status, error_text).into());
+            return Err(
+                format!("API request failed with status {}: {}", status, error_text).into(),
+            );
         }
 
         // Parse response
@@ -391,7 +389,7 @@ fn estimate_tokens(text: &str) -> usize {
 mod tests {
     use super::*;
     use core::{AnalyzeResponse, Document, Segment, SegmentScore};
-    
+
     // Helper function to create a test document
     fn create_test_document() -> Document {
         Document {
@@ -474,7 +472,7 @@ mod tests {
     #[test]
     fn test_build_prompt() {
         let document = create_test_document();
-        let analysis = create_test_analysis();
+        let _analysis = create_test_analysis();
         let selected_segments = vec![&document.segments[0], &document.segments[1]];
 
         let config = SummarizerConfig::new();
@@ -495,13 +493,13 @@ mod tests {
     fn test_extractive_fallback() {
         let document = create_test_document();
         let selected_segments = vec![&document.segments[0], &document.segments[1]];
-        
+
         let config = SummarizerConfig::new();
         let summarizer = Summarizer::new(config).unwrap();
-        
+
         let start_time = std::time::Instant::now();
         let (summary, metrics) = summarizer.extractive_fallback(&selected_segments, start_time);
-        
+
         assert!(!summary.is_empty());
         // Remove the useless comparison warning
         // assert!(metrics.processing_time_ms >= 0); // u64 is always >= 0

@@ -20,9 +20,6 @@ tokenizers = "0.20"
 # HTTP client for downloading models
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 
-# Environment variable handling
-dotenvy = "0.15"
-
 # File system operations
 dirs = "5.0"
 

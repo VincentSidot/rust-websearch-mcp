@@ -5,7 +5,6 @@
 //! The log level can be controlled via the RUST_LOG environment variable.
 
 use colored::Colorize;
-use dotenvy::dotenv;
 use std::sync::OnceLock;
 
 use log::Log;
@@ -66,15 +65,7 @@ pub fn init_logger() {
     static LOGGER: OnceLock<Logger> = OnceLock::new();
 
     log::set_logger(LOGGER.get_or_init(|| {
-        if let Err(err) = dotenv() {
-            println!(
-                "{} {}:{} - An error occured while loading the .env file ({})",
-                "[WARN]".yellow(),
-                file!(),
-                line!(),
-                err
-            )
-        }
+        utils::env::load_env();
         let level = std::env::var("LOG_LEVEL")
             .ok()
             .and_then(|level_str| level_str.to_uppercase().parse::<log::Level>().ok())

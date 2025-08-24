@@ -6,4 +6,4 @@ edition = "2021"
 [dependencies]
 log = "0.4"
 colored = "3.0.0"
-dotenvy = "0.15.7"
+utils = { path = "../utils" }

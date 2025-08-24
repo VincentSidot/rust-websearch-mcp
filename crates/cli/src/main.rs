@@ -1,11 +1,10 @@
 use clap::{Parser, Subcommand};
 use core::{AnalyzeResponse, Document};
-use dotenvy::dotenv;
+use std::fs;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
-use tokio;
 use std::path::Path;
-use std::fs;
+use tokio;
 
 /// CLI for the websearch pipeline
 #[derive(Parser)]
@@ -103,11 +102,8 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    utils::env::load_env();
     logger::init_logger();
-
-    if let Err(err) = dotenv() {
-        log::warn!("An error occured while loading .env file: {err}");
-    }
 
     let cli = Cli::parse();
 
@@ -233,6 +229,7 @@ async fn summarize_document(
     timeout_ms: u64,
     temperature: f32,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    logger::init_logger(); // Setup logger
     println!("Summarizing document");
     println!("Analysis path: {}", analysis_path);
     println!("Document path: {}", document_path);
@@ -259,6 +256,11 @@ async fn summarize_document(
         "extractive" => summarizer::config::SummaryStyle::Extractive,
         _ => summarizer::config::SummaryStyle::AbstractWithBullets, // Default
     };
+
+    log::trace!(
+        "Using OPENAI_BASE_URL={:?}",
+        std::env::var("OPENAI_BASE_URL")
+    );
 
     let config = summarizer::config::SummarizerConfig {
         base_url: std::env::var("OPENAI_BASE_URL").expect("Missing OPENAI_BASE_URL"),
@@ -309,7 +311,7 @@ async fn run_pipeline(
     timeout_ms: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use websearch::{scrape_webpage, scraped_to_document};
-    
+
     println!("Running full pipeline for URL: {}", url);
     println!("Output directory: {}", out_dir);
     println!("Top N segments: {}", top_n);
@@ -347,7 +349,7 @@ async fn run_pipeline(
     // Step 2: Analyze the document
     println!("\n--- Step 2: Analyzing ---");
     let analyze_start = std::time::Instant::now();
-    
+
     // Create analyzer configuration
     let analyzer_config = analyzer::config::AnalyzerConfig {
         backend: "onnx".to_string(),
@@ -380,7 +382,10 @@ async fn run_pipeline(
     let analysis_response = analyzer.analyze(&document)?;
     let analyze_duration = analyze_start.elapsed();
     println!("Analysis completed in {:?}", analyze_duration);
-    println!("Selected segments: {}", analysis_response.top_segments.len());
+    println!(
+        "Selected segments: {}",
+        analysis_response.top_segments.len()
+    );
 
     // Write analysis to file
     let analysis_path = Path::new(out_dir).join("analysis.json");
@@ -392,7 +397,7 @@ async fn run_pipeline(
     // Step 3: Summarize the document
     println!("\n--- Step 3: Summarizing ---");
     let summarize_start = std::time::Instant::now();
-    
+
     // Create summarizer configuration
     let style_enum = match style {
         "abstract_with_bullets" => summarizer::config::SummaryStyle::AbstractWithBullets,
@@ -402,7 +407,8 @@ async fn run_pipeline(
     };
 
     let summarizer_config = summarizer::config::SummarizerConfig {
-        base_url: std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
+        base_url: std::env::var("OPENAI_BASE_URL")
+            .unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
         model: std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-3.5-turbo".to_string()),
         timeout_ms,
         temperature: 0.2, // Default temperature
@@ -423,7 +429,10 @@ async fn run_pipeline(
     let summary_response = match summarizer.summarize(&document, &analysis_response).await {
         Ok(response) => response,
         Err(e) => {
-            println!("Warning: Summarization failed with error: {}. Using extractive fallback.", e);
+            println!(
+                "Warning: Summarization failed with error: {}. Using extractive fallback.",
+                e
+            );
             // Create a fallback summary response
             core::SummarizeResponse {
                 summary_text: "Summary generation failed. Using extractive fallback.".to_string(),
@@ -441,7 +450,7 @@ async fn run_pipeline(
             }
         }
     };
-    
+
     let summarize_duration = summarize_start.elapsed();
     println!("Summarization completed in {:?}", summarize_duration);
 
