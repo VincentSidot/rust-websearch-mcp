@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use core::{AnalyzeResponse, Document};
+use dotenvy::dotenv;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use tokio;
@@ -77,6 +78,11 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
+
+    if let Err(err) = dotenv() {
+        log::warn!("An error occured while loading .env file: {err}");
+    }
+
     let cli = Cli::parse();
 
     match &cli.command {
@@ -108,13 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             timeout_ms,
             temperature,
         } => {
-            summarize_document(
-                analysis,
-                document,
-                style,
-                *timeout_ms,
-                *temperature,
-            ).await?;
+            summarize_document(analysis, document, style, *timeout_ms, *temperature).await?;
         }
         Commands::Run { url } => {
             println!("Running full pipeline for URL: {}", url);
@@ -228,8 +228,8 @@ async fn summarize_document(
     };
 
     let config = summarizer::config::SummarizerConfig {
-        base_url: std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
-        model: std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-3.5-turbo".to_string()),
+        base_url: std::env::var("OPENAI_BASE_URL").expect("Missing OPENAI_BASE_URL"),
+        model: std::env::var("OPENAI_MODEL").expect("Missing OPENAI_MODEL"),
         timeout_ms,
         temperature,
         max_tokens: None, // Not configurable via CLI in this MVP

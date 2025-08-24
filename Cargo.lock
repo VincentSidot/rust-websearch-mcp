@@ -393,10 +393,13 @@ dependencies = [
  "analyzer",
  "clap",
  "core",
+ "dotenvy",
  "env_logger",
+ "log",
  "serde_json",
  "summarizer",
  "tokio",
+ "warp",
 ]
 
 [[package]]
