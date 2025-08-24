@@ -31,8 +31,8 @@ pub struct ErrorResponse {
 }
 
 /// Converts scraped data to a Document
-pub fn scraped_to_document(url: &str, scraped: &ScrapeResponse) -> core::Document {
-    use core::{Document, Segment};
+pub fn scraped_to_document(url: &str, scraped: &ScrapeResponse) -> kernel::Document {
+    use kernel::{Document, Segment};
     use std::collections::HashMap;
 
     // Get current timestamp in ISO 8601 format
@@ -62,7 +62,7 @@ pub fn scraped_to_document(url: &str, scraped: &ScrapeResponse) -> core::Documen
             }
 
             // Create a segment ID based on the text content
-            let segment_id = core::compute_segment_id(&segment_text);
+            let segment_id = kernel::compute_segment_id(&segment_text);
 
             Some(Segment {
                 segment_id,
@@ -80,10 +80,10 @@ pub fn scraped_to_document(url: &str, scraped: &ScrapeResponse) -> core::Documen
         .map(|s| s.text.clone())
         .collect::<Vec<_>>()
         .join("\n");
-    let doc_id = core::compute_doc_id(&content_for_id, "paragraphs", "websearch");
+    let doc_id = kernel::compute_doc_id(&content_for_id, "paragraphs", "websearch");
 
     Document {
-        schema_version: core::SCHEMA_VERSION.to_string(),
+        schema_version: kernel::SCHEMA_VERSION.to_string(),
         doc_id,
         url: url.to_string(),
         title,
@@ -264,16 +264,17 @@ fn extract_text_content(document: &Html) -> String {
 
 #[cfg(test)]
 mod tests {
-    // Tests are currently disabled due to compilation issues
-    // #[tokio::test]
-    // async fn test_scrape_webpage() {
-    //     // This test requires an internet connection
-    //     // You might want to use a mock HTTP client in a real test
-    //     let result = scrape_webpage("https://example.com").await;
-    //     assert!(result.is_ok());
+    use super::*;
 
-    //     let data = result.unwrap();
-    //     assert!(data.title.is_some());
-    //     assert!(!data.headings.is_empty());
-    // }
+    #[tokio::test]
+    async fn test_scrape_webpage() {
+        // This test requires an internet connection
+        // You might want to use a mock HTTP client in a real test
+        let result = scrape_webpage("https://example.com").await;
+        assert!(result.is_ok());
+
+        let data = result.unwrap();
+        assert!(data.title.is_some());
+        assert!(!data.headings.is_empty());
+    }
 }

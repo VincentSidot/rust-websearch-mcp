@@ -73,4 +73,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn main() {}
+fn main() {
+    // Prevent rerun on every build
+    println!("cargo:rerun-if-changed=build.rs");
+}

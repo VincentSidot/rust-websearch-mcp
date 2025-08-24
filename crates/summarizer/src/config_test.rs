@@ -1,7 +1,7 @@
 //! Tests for the summarizer config module
 
 use crate::config::{SummarizerConfig, SummaryStyle};
-use core::Config as CoreConfig;
+use kernel::Config as CoreConfig;
 use std::collections::HashMap;
 
 #[test]

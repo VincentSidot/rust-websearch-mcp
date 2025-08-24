@@ -3,7 +3,7 @@
 //! This module defines the configuration structures for the summarizer,
 //! including API configuration and style options.
 
-use core::Config as CoreConfig;
+use kernel::Config as CoreConfig;
 use serde::{Deserialize, Serialize};
 use std::env;
 
@@ -114,7 +114,7 @@ impl Default for SummarizerConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core::Config as CoreConfig;
+    use kernel::Config as CoreConfig;
     use std::collections::HashMap;
 
     #[test]

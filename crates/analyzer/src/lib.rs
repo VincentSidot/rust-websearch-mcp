@@ -9,7 +9,7 @@ pub mod config;
 pub mod model;
 
 use config::AnalyzerConfig;
-use core::{AnalysisMetrics, AnalyzeResponse, Document, SegmentScore};
+use kernel::{AnalysisMetrics, AnalyzeResponse, Document, SegmentScore};
 use log::{debug, info};
 use ndarray::{Array2, Axis};
 use ort::session::Session;
@@ -38,12 +38,12 @@ pub struct Analyzer {
 
 impl Analyzer {
     /// Create a new analyzer with the given configuration
-    pub fn new(config: AnalyzerConfig) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new(config: AnalyzerConfig) -> Result<Self, Box<dyn std::error::Error>> {
         Self::ensure_ort_loaded_on_windows(); // Ensure windows linked well
         info!("Initializing analyzer with config: {:?}", config);
 
         // Resolve model files
-        let resolved_model = model::resolve_model(&config)?;
+        let resolved_model = model::resolve_model(&config).await?;
         info!("Resolved model files: {:?}", resolved_model.file_paths);
 
         // Find the ONNX model file and tokenizer file
@@ -529,18 +529,18 @@ mod tests {
         assert_eq!(selected.len(), 2);
     }
 
-    #[test]
-    fn test_analyzer_creation_local_missing() {
+    #[tokio::test]
+    async fn test_analyzer_creation_local_missing() {
         let mut config = AnalyzerConfig::new();
         // Disable downloads for testing
         config.allow_downloads = false;
-        let analyzer = Analyzer::new(config);
+        let analyzer = Analyzer::new(config).await;
         // This should fail because we're not allowing downloads and the model isn't available locally
         assert!(analyzer.is_err());
     }
 
-    #[test]
-    fn test_analyze_snapshot() {
+    #[tokio::test]
+    async fn test_analyze_snapshot() {
         // This test requires a real model, so we'll skip it in CI
         // To run it locally, you need to have the model files available
         if std::env::var("EMBED_ONNX_TEST").unwrap_or_default() != "1" {
@@ -549,7 +549,7 @@ mod tests {
         }
 
         // Create a simple document for testing
-        let document = core::Document {
+        let document = kernel::Document {
             schema_version: "1.0.0".to_string(),
             doc_id: "test-doc-123".to_string(),
             url: "https://example.com".to_string(),
@@ -557,19 +557,19 @@ mod tests {
             lang: "en".to_string(),
             fetched_at: "2023-01-01T00:00:00Z".to_string(),
             segments: vec![
-                core::Segment {
+                kernel::Segment {
                     segment_id: "seg-1".to_string(),
                     text: "This is the first segment.".to_string(),
                     path: "body > p:nth-child(1)".to_string(),
                     position: 0,
                 },
-                core::Segment {
+                kernel::Segment {
                     segment_id: "seg-2".to_string(),
                     text: "This is the second segment.".to_string(),
                     path: "body > p:nth-child(2)".to_string(),
                     position: 1,
                 },
-                core::Segment {
+                kernel::Segment {
                     segment_id: "seg-3".to_string(),
                     text: "This is the third segment.".to_string(),
                     path: "body > p:nth-child(3)".to_string(),
@@ -581,7 +581,9 @@ mod tests {
 
         // Create analyzer with default config
         let config = AnalyzerConfig::new();
-        let mut analyzer = Analyzer::new(config.clone()).expect("Failed to create analyzer");
+        let mut analyzer = Analyzer::new(config.clone())
+            .await
+            .expect("Failed to create analyzer");
 
         // Analyze the document
         let response = analyzer

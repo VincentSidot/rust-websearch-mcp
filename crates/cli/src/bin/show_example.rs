@@ -1,4 +1,4 @@
-use core::{AnalyzeResponse, Document};
+use kernel::{AnalyzeResponse, Document};
 use std::fs::File;
 use std::io::BufReader;
 
@@ -18,11 +18,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Document Title: {}", document.title);
     println!("Number of segments: {}", document.segments.len());
     println!("Selected segments: {}", analysis.top_segments.len());
-    
+
     for (i, segment_score) in analysis.top_segments.iter().enumerate() {
         println!("  {}. Segment ID: {}", i + 1, segment_score.segment_id);
         // Find the segment text
-        if let Some(segment) = document.segments.iter().find(|s| s.segment_id == segment_score.segment_id) {
+        if let Some(segment) = document
+            .segments
+            .iter()
+            .find(|s| s.segment_id == segment_score.segment_id)
+        {
             println!("     Text: {}", segment.text);
         }
     }

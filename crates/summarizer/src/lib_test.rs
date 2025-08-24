@@ -1,6 +1,6 @@
 //! Tests for the summarizer crate
 
-use core::{AnalyzeResponse, Document, Segment, SegmentScore};
+use kernel::{AnalyzeResponse, Document, Segment, SegmentScore};
 use serde_json::json;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;

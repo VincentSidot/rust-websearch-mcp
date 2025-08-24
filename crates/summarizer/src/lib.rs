@@ -10,7 +10,7 @@
 pub mod config;
 
 use config::{SummarizerConfig, SummaryStyle};
-use core::{
+use kernel::{
     AnalyzeResponse, Citation, Document, GuardrailsInfo, Segment, SummarizationMetrics,
     SummarizeResponse,
 };
@@ -388,7 +388,7 @@ fn estimate_tokens(text: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core::{AnalyzeResponse, Document, Segment, SegmentScore};
+    use kernel::{AnalyzeResponse, Document, Segment, SegmentScore};
 
     // Helper function to create a test document
     fn create_test_document() -> Document {
@@ -442,7 +442,7 @@ mod tests {
                     reason: "Diverse content".to_string(),
                 },
             ],
-            metrics: core::AnalysisMetrics {
+            metrics: kernel::AnalysisMetrics {
                 num_segments: 3,
                 top_n: 2,
                 mmr_lambda: 0.65,

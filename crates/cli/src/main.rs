@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use core::{AnalyzeResponse, Document};
+use kernel::{AnalyzeResponse, Document};
 use std::fs;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
@@ -127,7 +127,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 *batch_size,
                 *max_seq_len,
                 output.as_deref(),
-            )?;
+            )
+            .await?;
         }
         Commands::Summarize {
             analysis,
@@ -154,7 +155,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn analyze_document(
+async fn analyze_document(
     path: &str,
     top_n: usize,
     mmr_lambda: f32,
@@ -191,7 +192,7 @@ fn analyze_document(
     };
 
     // Create analyzer
-    let mut analyzer = analyzer::Analyzer::new(config)?;
+    let mut analyzer = analyzer::Analyzer::new(config).await?;
 
     // Log model info
     println!("Model ID: {}", analyzer.model_fingerprint());
@@ -372,7 +373,7 @@ async fn run_pipeline(
     };
 
     // Create analyzer
-    let mut analyzer = analyzer::Analyzer::new(analyzer_config)?;
+    let mut analyzer = analyzer::Analyzer::new(analyzer_config).await?;
 
     // Log model info
     println!("Model ID: {}", analyzer.model_fingerprint());
@@ -434,15 +435,15 @@ async fn run_pipeline(
                 e
             );
             // Create a fallback summary response
-            core::SummarizeResponse {
+            kernel::SummarizeResponse {
                 summary_text: "Summary generation failed. Using extractive fallback.".to_string(),
                 bullets: None,
                 citations: None,
-                guardrails: Some(core::GuardrailsInfo {
+                guardrails: Some(kernel::GuardrailsInfo {
                     filtered: true,
                     reason: Some(format!("API error: {}", e)),
                 }),
-                metrics: core::SummarizationMetrics {
+                metrics: kernel::SummarizationMetrics {
                     processing_time_ms: summarize_start.elapsed().as_millis() as u64,
                     input_tokens: 0,
                     output_tokens: 0,
