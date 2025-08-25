@@ -2,7 +2,7 @@
 //!
 //! This module provides logging functionality.
 //! It sets up a logger with a default level of INFO.
-//! The log level can be controlled via the RUST_LOG environment variable.
+//! The log level can be controlled via the LOG_LEVEL environment variable.
 use std::sync::OnceLock;
 
 use colored::Colorize;
@@ -87,14 +87,14 @@ impl Log for Logger {
     fn flush(&self) {}
 }
 
-const DEFAULT_RUST_LOG: &str = "html5ever=warn,tokenizer=warn,reqwest=warn,ort=warn";
+const DEFAULT_LOG_LEVEL: &str = "html5ever=warn,tokenizer=warn,reqwest=warn,ort=warn";
 
-/// Parse RUST_LOG-like specs: e.g. "info,html5ever=off,reqwest=warn,websearch=trace"
+/// Parse LOG_LEVEL-like specs: e.g. "info,html5ever=off,reqwest=warn,websearch=trace"
 fn parse_filters() -> (LevelFilter, Vec<(String, LevelFilter)>) {
     let mut default: LevelFilter = LevelFilter::Info;
     let mut overrides: Vec<(String, LevelFilter)> = Vec::new();
 
-    for part in DEFAULT_RUST_LOG
+    for part in DEFAULT_LOG_LEVEL
         .split(',')
         .map(str::trim)
         .filter(|s| !s.is_empty())
@@ -111,7 +111,7 @@ fn parse_filters() -> (LevelFilter, Vec<(String, LevelFilter)>) {
         }
     }
 
-    if let Ok(spec) = std::env::var("RUST_LOG") {
+    if let Ok(spec) = std::env::var("LOG_LEVEL") {
         for part in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
             if let Some((target, lvl)) = part.split_once('=') {
                 let lf = parse_level_filter(lvl).unwrap_or(LevelFilter::Info);
@@ -146,8 +146,8 @@ fn parse_level_filter(s: &str) -> Option<LevelFilter> {
 /// Initializes the logger
 ///
 /// This function sets up the logger with a default level of INFO.
-/// The log level can be controlled via the RUST_LOG environment variable.
-/// For example: `RUST_LOG=debug` or `RUST_LOG=websearch=trace`
+/// The log level can be controlled via the LOG_LEVEL environment variable.
+/// For example: `LOG_LEVEL=debug` or `LOG_LEVEL=websearch=trace`
 pub fn init_logger() {
     static LOGGER: OnceLock<Logger> = OnceLock::new();
 

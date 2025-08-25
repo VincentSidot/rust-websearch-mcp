@@ -909,6 +909,8 @@ fn mmr_selection(
 
 #[cfg(test)]
 mod tests {
+    use std::env::{current_dir, set_current_dir};
+
     use super::*;
 
     #[test]
@@ -967,6 +969,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_analyzer_creation_local_missing() {
+        // Change cwd to load dylib correctly in tests
+        {
+            let current_directory = current_dir().expect("Failed to get current directory");
+            set_current_dir(current_directory.join("../../")).expect("Failed to change directory");
+        }
         let mut config = AnalyzerConfig::new();
         // Disable downloads for testing
         config.allow_downloads = false;
