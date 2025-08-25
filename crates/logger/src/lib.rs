@@ -87,7 +87,8 @@ impl Log for Logger {
     fn flush(&self) {}
 }
 
-const DEFAULT_LOG_LEVEL: &str = "html5ever=warn,tokenizer=warn,reqwest=warn,ort=warn";
+const DEFAULT_LOG_LEVEL: &str =
+    "html5ever=warn,tokenizer=warn,reqwest=warn,ort=warn,pagecache=warn";
 
 /// Parse LOG_LEVEL-like specs: e.g. "info,html5ever=off,reqwest=warn,websearch=trace"
 fn parse_filters() -> (LevelFilter, Vec<(String, LevelFilter)>) {

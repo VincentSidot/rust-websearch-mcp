@@ -323,7 +323,6 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
 
 ## 6) Observability
 
-- [ ] Structured logs via `tracing`/`tracing-subscriber` (doc_id, request_id).
 - [ ] Metrics: per-stage latency, cache hit rate, token usage, redundancy.
 - [ ] `--healthcheck` for analyzer (models load) and summarizer (API reachable).
 
