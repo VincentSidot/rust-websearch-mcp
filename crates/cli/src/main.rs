@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use kernel::{AnalyzeResponse, Document};
 use std::fs;
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use tokio;
 
@@ -144,10 +144,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cli = Cli::parse();
 
-    match cli.command {
+    let result = match cli.command {
         Commands::Scrape { url } => {
             println!("Scraping URL: {}", url);
             // TODO: Implement scraping
+            Ok(())
         }
         Commands::Analyze {
             path,
@@ -171,7 +172,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 onnx_provider,
                 output,
             )
-            .await?;
+            .await
         }
         Commands::Summarize {
             analysis,
@@ -180,7 +181,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             timeout_ms,
             temperature,
         } => {
-            summarize_document(&analysis, &document, &style, timeout_ms, temperature).await?;
+            summarize_document(&analysis, &document, &style, timeout_ms, temperature).await
         }
         Commands::Run {
             url,
@@ -205,19 +206,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 timeout_ms,
                 onnx_provider,
             )
-            .await?;
+            .await
         }
         Commands::Cache { subcommand } => match subcommand {
             CacheCommands::Stats => {
-                cache_stats().await?;
+                cache_stats().await
             }
             CacheCommands::Clear => {
-                cache_clear().await?;
+                cache_clear().await
             }
         },
-    }
+    };
 
-    Ok(())
+    // Handle the result
+    match result {
+        Ok(()) => {
+            // Explicitly flush stdout to ensure all output is written before exit
+            std::io::stdout().flush().ok();
+            // Exit immediately to avoid cleanup issues
+            std::process::exit(0);
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    }
 }
 
 async fn analyze_document(
@@ -299,6 +312,9 @@ async fn analyze_document(
     // Record end time
     let duration = start_time.elapsed();
     println!("Document analysis completed in {:?}", duration);
+
+    // Explicitly shutdown the analyzer to ensure proper cleanup before writing output
+    analyzer.shutdown()?;
 
     // Write output
     if let Some(output_path) = output {
@@ -506,6 +522,9 @@ async fn run_pipeline(
         "Selected segments: {}",
         analysis_response.top_segments.len()
     );
+
+    // Explicitly shutdown the analyzer to ensure proper cleanup
+    analyzer.shutdown()?;
 
     // Write analysis to file
     let analysis_path = Path::new(out_dir).join("analysis.json");

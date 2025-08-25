@@ -67,6 +67,32 @@ pub struct EmbeddingCache {
 }
 
 impl EmbeddingCache {
+    /// Flush the cache database to ensure all writes are persisted
+    pub fn flush(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.db.flush()?;
+        Ok(())
+    }
+    
+    /// Close the cache database
+    pub fn close(self) -> Result<(), Box<dyn std::error::Error>> {
+        // Flush before closing
+        self.db.flush()?;
+        // Drop the database instance
+        drop(self);
+        Ok(())
+    }
+}
+
+impl Drop for EmbeddingCache {
+    fn drop(&mut self) {
+        // Flush the database to ensure all writes are persisted
+        if let Err(e) = self.db.flush() {
+            log::warn!("Failed to flush cache database: {}", e);
+        }
+    }
+}
+
+impl EmbeddingCache {
     /// Create a new embedding cache
     pub fn new(config: CacheConfig) -> Result<Self, Box<dyn std::error::Error>> {
         if !config.enabled {
