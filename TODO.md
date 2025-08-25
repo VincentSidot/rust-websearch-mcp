@@ -301,6 +301,24 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
   - Verified cache functionality with integration tests showing significant performance improvement
   - Observed hit ratio of 100% on second run with execution time dropping from 577ms to 8ms
 
+- **2025-08-25**: Step 5B: Summarizer — response cache (sled) + cache CLI + prompt-versioned keys
+  - Implemented persistent local cache for summarization responses using sled database
+  - Added summarizer config keys: `cache.enabled = true`, `cache.path`, `cache.ttl_days`
+  - Cache key format: `sum:{doc_id}:{hash(payload)}` with deterministic hashing of:
+    - Document ID
+    - Ordered selected segment IDs
+    - Summary style
+    - Map-reduce configuration
+    - LLM model and base URL
+    - Prompt version for cache invalidation
+  - Read-through / write-through cache implementation with proper hit/miss handling
+  - Added CLI maintenance commands: `summarizer cache stats` and `summarizer cache clear`
+  - Added global flag `--no-summary-cache` to bypass cache for a run
+  - Extended `SummarizationMetrics` with `cache_hit`, `mode`, and `prompt_version` fields
+  - Added logging for cache hits/misses with timing information
+  - Updated README with documentation for summarizer cache functionality
+  - Verified cache functionality with integration tests showing significant API cost reduction
+
 ---
 
 ## 6) Observability

@@ -146,6 +146,41 @@ When enabled:
 Configuration options:
 - `--rerank-top-m <int>`: Number of segments to consider for reranking (default: 30)
 
+## Caching
+
+The pipeline includes built-in caching for both embedding computations and summarization responses to improve performance and reduce API costs.
+
+### Embedding Cache
+
+The analyzer caches segment embeddings to avoid recomputing them for identical segments:
+
+- **Location**: `./.cache/analyzer` by default
+- **Key Format**: `emb:{segment_id}:{embedding_model_fingerprint}`
+- **CLI Commands**:
+  - `cargo run --bin cli -- cache stats` - Show embedding cache statistics
+  - `cargo run --bin cli -- cache clear` - Clear the embedding cache
+
+### Summarization Cache
+
+The summarizer caches complete summary responses to avoid repeated LLM calls for identical inputs:
+
+- **Location**: `./.cache/summarizer` by default
+- **Key Format**: `sum:{doc_id}:{hash(payload)}`
+- **Key Components** (hashed together):
+  - Document ID
+  - Selected segment IDs (ordered)
+  - Summary style (abstract_with_bullets/tldr/extractive)
+  - Map-reduce configuration (enabled flag and parameters)
+  - LLM model and base URL
+  - Prompt version (for cache invalidation)
+- **CLI Commands**:
+  - `cargo run --bin cli -- cache summary-stats` - Show summarizer cache statistics
+  - `cargo run --bin cli -- cache summary-clear` - Clear the summarizer cache
+- **Bypass Cache**:
+  - Use `--no-summary-cache` flag with `summarize` or `run` commands
+
+Cache entries are persisted using the `sled` embedded database and can be inspected or cleared using the CLI commands.
+
 ## Output Files
 
 When running the full pipeline, the following files are generated in the output directory:

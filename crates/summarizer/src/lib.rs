@@ -7,8 +7,10 @@
 //! - Returning a SummarizeResponse JSON
 //! - Providing an extractive fallback on timeout/error
 
+pub mod cache;
 pub mod config;
 
+use cache::{CacheKey, SummarizerCache};
 use config::{SummarizerConfig, SummaryStyle};
 use kernel::{
     AnalyzeResponse, Citation, Document, GuardrailsInfo, Segment, SummarizationMetrics,
@@ -18,8 +20,12 @@ use log::{debug, info, warn};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::time::{timeout, Duration};
+
+/// Prompt version - bump this to invalidate cache after template changes
+const PROMPT_VERSION: &str = "v1";
 
 /// The main summarizer struct
 pub struct Summarizer {
@@ -27,6 +33,8 @@ pub struct Summarizer {
     config: SummarizerConfig,
     /// HTTP client for API requests
     client: Client,
+    /// Cache for summarization responses
+    cache: Option<Arc<SummarizerCache>>,
 }
 
 /// Request structure for the OpenAI-compatible API
@@ -74,7 +82,14 @@ impl Summarizer {
             .timeout(Duration::from_millis(config.timeout_ms))
             .build()?;
 
-        Ok(Self { config, client })
+        // Initialize cache if enabled
+        let cache = if config.cache.enabled {
+            Some(Arc::new(SummarizerCache::new(config.cache.clone())?))
+        } else {
+            None
+        };
+
+        Ok(Self { config, client, cache })
     }
 
     /// Summarize a document using an AnalyzeResponse
@@ -104,16 +119,66 @@ impl Summarizer {
             && total_tokens > self.config.map_reduce.max_context_tokens;
 
         // Log decision
-        if use_map_reduce {
+        let mode = if use_map_reduce {
             info!(
                 "Using map-reduce path ({} tokens > {} threshold)",
                 total_tokens, self.config.map_reduce.max_context_tokens
             );
+            "map-reduce"
         } else {
             info!(
                 "Using single-pass path ({} tokens <= {} threshold)",
                 total_tokens, self.config.map_reduce.max_context_tokens
             );
+            "single-pass"
+        };
+
+        // Create cache key components
+        let selected_segment_ids: Vec<String> = analysis
+            .top_segments
+            .iter()
+            .map(|s| s.segment_id.clone())
+            .collect();
+            
+        let style_str = match self.config.style {
+            SummaryStyle::AbstractWithBullets => "abstract_with_bullets".to_string(),
+            SummaryStyle::TlDr => "tldr".to_string(),
+            SummaryStyle::Extractive => "extractive".to_string(),
+        };
+
+        // Create cache key
+        let cache_key = CacheKey::new(
+            document.doc_id.clone(),
+            selected_segment_ids,
+            style_str,
+            self.config.map_reduce.enabled,
+            self.config.map_reduce.max_context_tokens,
+            self.config.map_reduce.map_group_tokens,
+            self.config.map_reduce.reduce_target_words,
+            self.config.model.clone(),
+            self.config.base_url.clone(),
+            PROMPT_VERSION.to_string(),
+        );
+
+        // Check cache first
+        if let Some(cache) = &self.cache {
+            match cache.get_summary(&cache_key) {
+                Ok(Some(mut response)) => {
+                    info!("Cache hit for summarization");
+                    // Update metrics to indicate cache hit
+                    response.metrics.cache_hit = true;
+                    response.metrics.mode = mode.to_string();
+                    response.metrics.prompt_version = PROMPT_VERSION.to_string();
+                    response.metrics.processing_time_ms = start_time.elapsed().as_millis() as u64;
+                    return Ok(response);
+                }
+                Ok(None) => {
+                    info!("Cache miss for summarization");
+                }
+                Err(e) => {
+                    warn!("Cache read error: {}. Proceeding without cache.", e);
+                }
+            }
         }
 
         // Generate summary based on decision
@@ -124,6 +189,21 @@ impl Summarizer {
             self.summarize_single_pass(document, &selected_segments, start_time)
                 .await
         };
+
+        // Update metrics with mode and prompt version
+        let result = result.map(|mut response| {
+            response.metrics.mode = mode.to_string();
+            response.metrics.prompt_version = PROMPT_VERSION.to_string();
+            response.metrics.cache_hit = false;
+            response
+        });
+
+        // Cache the result if cache is enabled
+        if let (Ok(response), Some(cache)) = (&result, &self.cache) {
+            if let Err(e) = cache.put_summary(&cache_key, response) {
+                warn!("Failed to cache summary response: {}", e);
+            }
+        }
 
         result
     }
@@ -190,6 +270,9 @@ impl Summarizer {
                     processing_time_ms: duration.as_millis() as u64,
                     input_tokens: estimate_tokens(&prompt),
                     output_tokens: estimate_tokens(&summary_text),
+                    cache_hit: false, // Will be set by caller
+                    mode: "single-pass".to_string(), // Will be set by caller
+                    prompt_version: PROMPT_VERSION.to_string(), // Will be set by caller
                 };
                 (summary_text, bullets, Some(citations), None, metrics)
             }
@@ -429,6 +512,9 @@ impl Summarizer {
                 .map(|s| estimate_tokens(&s.text))
                 .sum(),
             output_tokens: estimate_tokens(&summary),
+            cache_hit: false,
+            mode: "extractive".to_string(),
+            prompt_version: PROMPT_VERSION.to_string(),
         };
 
         (summary, metrics)
@@ -466,6 +552,9 @@ impl Summarizer {
                 .map(|s| estimate_tokens(&s.text))
                 .sum(),
             output_tokens: estimate_tokens(&summary_text),
+            cache_hit: false, // Will be set by caller
+            mode: "map-reduce".to_string(), // Will be set by caller
+            prompt_version: PROMPT_VERSION.to_string(), // Will be set by caller
         };
 
         // Create response

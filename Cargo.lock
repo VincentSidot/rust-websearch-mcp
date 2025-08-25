@@ -3203,6 +3203,8 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 name = "summarizer"
 version = "0.1.0"
 dependencies = [
+ "bincode",
+ "blake3",
  "clap",
  "futures",
  "kernel",
@@ -3211,6 +3213,8 @@ dependencies = [
  "reqwest 0.11.27",
  "serde",
  "serde_json",
+ "sled",
+ "tempfile",
  "tokio",
  "warp",
 ]

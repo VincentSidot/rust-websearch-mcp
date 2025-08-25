@@ -144,6 +144,15 @@ pub struct SummarizationMetrics {
     pub input_tokens: usize,
     /// Number of output tokens
     pub output_tokens: usize,
+    /// Whether the result was served from cache
+    #[serde(default)]
+    pub cache_hit: bool,
+    /// Mode of operation (single-pass or map-reduce)
+    #[serde(default)]
+    pub mode: String,
+    /// Prompt version used
+    #[serde(default)]
+    pub prompt_version: String,
 }
 
 /// Placeholder for error types
@@ -316,6 +325,9 @@ mod tests {
                 processing_time_ms: 100,
                 input_tokens: 1000,
                 output_tokens: 100,
+                cache_hit: false,
+                mode: "single-pass".to_string(),
+                prompt_version: "v1".to_string(),
             },
         };
 
@@ -342,6 +354,9 @@ mod tests {
                 processing_time_ms: 100,
                 input_tokens: 1000,
                 output_tokens: 100,
+                cache_hit: false,
+                mode: "single-pass".to_string(),
+                prompt_version: "v1".to_string(),
             },
         };
 

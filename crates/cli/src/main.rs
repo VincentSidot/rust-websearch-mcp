@@ -13,6 +13,10 @@ use tokio;
 struct Cli {
     #[clap(subcommand)]
     command: Commands,
+
+    /// Bypass summary cache
+    #[clap(long, global = true)]
+    no_summary_cache: bool,
 }
 
 #[derive(Subcommand)]
@@ -171,10 +175,14 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum CacheCommands {
-    /// Show cache statistics
+    /// Show analyzer cache statistics
     Stats,
-    /// Clear the cache
+    /// Clear the analyzer cache
     Clear,
+    /// Show summarizer cache statistics
+    SummaryStats,
+    /// Clear the summarizer cache
+    SummaryClear,
 }
 
 #[tokio::main]
@@ -237,6 +245,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 map_group_tokens,
                 reduce_target_words,
                 concurrency,
+                cli.no_summary_cache,
             )
             .await
         }
@@ -272,6 +281,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 map_group_tokens,
                 reduce_target_words,
                 concurrency,
+                cli.no_summary_cache,
             )
             .await
         }
@@ -281,6 +291,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             CacheCommands::Clear => {
                 cache_clear().await
+            }
+            CacheCommands::SummaryStats => {
+                summary_cache_stats().await
+            }
+            CacheCommands::SummaryClear => {
+                summary_cache_clear().await
             }
         },
     };
@@ -407,6 +423,7 @@ async fn summarize_document(
     map_group_tokens: Option<usize>,
     reduce_target_words: Option<usize>,
     concurrency: Option<usize>,
+    no_summary_cache: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     logger::init_logger(); // Setup logger
     println!("Summarizing document");
@@ -456,6 +473,13 @@ async fn summarize_document(
             reduce_target_words: reduce_target_words.unwrap_or(200),
             concurrency: concurrency.unwrap_or(4),
         },
+        cache: if no_summary_cache {
+            let mut cache = summarizer::config::CacheConfig::default();
+            cache.enabled = false;
+            cache
+        } else {
+            summarizer::config::CacheConfig::default()
+        },
     };
 
     // Override map-reduce config from environment if not provided via CLI
@@ -485,6 +509,11 @@ async fn summarize_document(
     println!("Timeout: {} ms", config.timeout_ms);
     println!("Temperature: {}", config.temperature);
     println!("Style: {:?}", config.style);
+    if no_summary_cache {
+        println!("Summary cache: disabled (bypassed)");
+    } else {
+        println!("Summary cache: enabled");
+    }
 
     // Create summarizer
     let summarizer = summarizer::Summarizer::new(config)?;
@@ -525,6 +554,7 @@ async fn run_pipeline(
     map_group_tokens: Option<usize>,
     reduce_target_words: Option<usize>,
     concurrency: Option<usize>,
+    no_summary_cache: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use websearch::{scrape_webpage, scraped_to_document};
 
@@ -540,6 +570,9 @@ async fn run_pipeline(
     }
     println!("Summary style: {}", style);
     println!("API timeout: {} ms", timeout_ms);
+    if no_summary_cache {
+        println!("Summary cache: disabled (bypassed)");
+    }
 
     // Create output directory if it doesn't exist
     fs::create_dir_all(out_dir)?;
@@ -666,6 +699,13 @@ async fn run_pipeline(
             reduce_target_words: reduce_target_words.unwrap_or(200),
             concurrency: concurrency.unwrap_or(4),
         },
+        cache: if no_summary_cache {
+            let mut cache = summarizer::config::CacheConfig::default();
+            cache.enabled = false;
+            cache
+        } else {
+            summarizer::config::CacheConfig::default()
+        },
     };
 
     // Override map-reduce config from environment if not provided via CLI
@@ -719,6 +759,9 @@ async fn run_pipeline(
                     processing_time_ms: summarize_start.elapsed().as_millis() as u64,
                     input_tokens: 0,
                     output_tokens: 0,
+                    cache_hit: false,
+                    mode: "extractive".to_string(),
+                    prompt_version: "v1".to_string(),
                 },
             }
         }
@@ -744,6 +787,13 @@ async fn run_pipeline(
         }
     }
 
+    // Print cache hit info if available
+    if summary_response.metrics.cache_hit {
+        println!("\n[Cache HIT] Response served from cache");
+    } else {
+        println!("\n[Cache MISS] Response generated fresh");
+    }
+
     // Print completion info
     let total_duration = start_time.elapsed();
     println!("\n--- Pipeline completed in {:?} ---", total_duration);
@@ -766,7 +816,7 @@ async fn cache_stats() -> Result<(), Box<dyn std::error::Error>> {
     // Get stats
     let stats = cache.get_stats()?;
 
-    println!("Cache Statistics:");
+    println!("Analyzer Cache Statistics:");
     println!("  Entry Count: {}", stats.entry_count);
     println!("  Estimated Size: {} bytes", stats.total_size_bytes);
 
@@ -784,7 +834,41 @@ async fn cache_clear() -> Result<(), Box<dyn std::error::Error>> {
     // Clear cache
     cache.clear()?;
 
-    println!("Cache cleared successfully");
+    println!("Analyzer cache cleared successfully");
+
+    Ok(())
+}
+
+/// Show summarizer cache statistics
+async fn summary_cache_stats() -> Result<(), Box<dyn std::error::Error>> {
+    // Create default summarizer config to get cache path
+    let config = summarizer::config::SummarizerConfig::new();
+
+    // Initialize cache
+    let cache = summarizer::cache::SummarizerCache::new(config.cache)?;
+
+    // Get stats
+    let stats = cache.get_stats()?;
+
+    println!("Summarizer Cache Statistics:");
+    println!("  Entry Count: {}", stats.entry_count);
+    println!("  Estimated Size: {} bytes", stats.total_size_bytes);
+
+    Ok(())
+}
+
+/// Clear the summarizer cache
+async fn summary_cache_clear() -> Result<(), Box<dyn std::error::Error>> {
+    // Create default summarizer config to get cache path
+    let config = summarizer::config::SummarizerConfig::new();
+
+    // Initialize cache
+    let cache = summarizer::cache::SummarizerCache::new(config.cache)?;
+
+    // Clear cache
+    cache.clear()?;
+
+    println!("Summarizer cache cleared successfully");
 
     Ok(())
 }

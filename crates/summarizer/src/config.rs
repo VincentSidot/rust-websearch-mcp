@@ -7,6 +7,42 @@ use kernel::Config as CoreConfig;
 use serde::{Deserialize, Serialize};
 use std::env;
 
+/// Configuration for caching
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CacheConfig {
+    /// Whether caching is enabled
+    #[serde(default = "default_cache_enabled")]
+    pub enabled: bool,
+
+    /// Path to the cache directory
+    #[serde(default = "default_cache_path")]
+    pub path: String,
+
+    /// Time-to-live for cache entries in days (0 = no TTL)
+    #[serde(default)]
+    pub ttl_days: u32,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_cache_enabled(),
+            path: default_cache_path(),
+            ttl_days: 0, // 0 means no TTL
+        }
+    }
+}
+
+/// Default value for cache enabled - true
+fn default_cache_enabled() -> bool {
+    true
+}
+
+/// Default value for cache path - "./.cache/summarizer"
+fn default_cache_path() -> String {
+    "./.cache/summarizer".to_string()
+}
+
 /// Configuration for the summarizer
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SummarizerConfig {
@@ -34,6 +70,10 @@ pub struct SummarizerConfig {
 
     /// Map-reduce configuration
     pub map_reduce: MapReduceConfig,
+
+    /// Cache configuration
+    #[serde(default)]
+    pub cache: CacheConfig,
 }
 
 /// Style of summary to generate
@@ -83,6 +123,7 @@ impl SummarizerConfig {
                 reduce_target_words: 200,
                 concurrency: 4,
             },
+            cache: CacheConfig::default(),
         }
     }
 
@@ -144,6 +185,19 @@ impl SummarizerConfig {
                         config.map_reduce.concurrency = val;
                     }
                 }
+                "cache.enabled" => {
+                    if let Ok(val) = value.parse::<bool>() {
+                        config.cache.enabled = val;
+                    }
+                }
+                "cache.path" => {
+                    config.cache.path = value.clone();
+                }
+                "cache.ttl_days" => {
+                    if let Ok(val) = value.parse::<u32>() {
+                        config.cache.ttl_days = val;
+                    }
+                }
                 _ => {} // Ignore unknown keys
             }
         }
@@ -172,6 +226,17 @@ impl SummarizerConfig {
         }
         if let Ok(val) = env::var("MAP_REDUCE_CONCURRENCY").map(|v| v.parse::<usize>().unwrap_or(4)) {
             config.map_reduce.concurrency = val;
+        }
+
+        // Load cache config from environment (higher precedence)
+        if let Ok(val) = env::var("SUMMARY_CACHE_ENABLED").map(|v| v.parse::<bool>().unwrap_or(true)) {
+            config.cache.enabled = val;
+        }
+        if let Ok(val) = env::var("SUMMARY_CACHE_PATH") {
+            config.cache.path = val;
+        }
+        if let Ok(val) = env::var("SUMMARY_CACHE_TTL_DAYS").map(|v| v.parse::<u32>().unwrap_or(0)) {
+            config.cache.ttl_days = val;
         }
 
         config
