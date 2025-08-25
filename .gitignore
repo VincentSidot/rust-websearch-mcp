@@ -12,7 +12,15 @@
 /.cache
 
 # Onnx runtime
+
+## Windows
 /onnxruntime.dll
-/libonnxruntime.so
 /onnxruntime_providers_*.dll
+
+## Linux
+/libonnxruntime.so
 /libonnxruntime_providers_*.so
+
+## MacOS
+/libonnxruntime.dylib
+/libonnxruntime_providers_*.dylib

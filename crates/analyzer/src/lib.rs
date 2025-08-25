@@ -55,6 +55,10 @@ pub struct Analyzer {
 const ORT_DEFAULT_PATH: &str = "./onnxruntime.dll";
 #[cfg(target_os = "linux")]
 const ORT_DEFAULT_PATH: &str = "./libonnxruntime.so";
+#[cfg(target_os = "macos")]
+const ORT_DEFAULT_PATH: &str = "./libonnxruntime.dylib";
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+const ORT_DEFAULT_PATH: &str = "";
 
 impl Analyzer {
     /// Create a new analyzer with the given configuration
@@ -165,15 +169,17 @@ impl Analyzer {
 
                 // Create ONNX Runtime environment and session for reranker
                 let mut session_builder = Session::builder()?;
-                
+
                 // Configure threading if specified
                 if config.reranker.intra_op_threads > 0 {
-                    session_builder = session_builder.with_intra_threads(config.reranker.intra_op_threads)?;
+                    session_builder =
+                        session_builder.with_intra_threads(config.reranker.intra_op_threads)?;
                 }
                 if config.reranker.inter_op_threads > 0 {
-                    session_builder = session_builder.with_inter_threads(config.reranker.inter_op_threads)?;
+                    session_builder =
+                        session_builder.with_inter_threads(config.reranker.inter_op_threads)?;
                 }
-                
+
                 let reranker_session = session_builder.commit_from_file(reranker_model_path)?;
 
                 // Get reranker model fingerprint
@@ -543,7 +549,10 @@ impl Analyzer {
                 // Apply truncation policy: prefer truncating the candidate tail if needed
                 if ids.len() > self.reranker_max_seq_len {
                     // Truncate from the end (candidate tail truncation)
-                    ids[..self.reranker_max_seq_len].iter().map(|&x| x as i64).collect()
+                    ids[..self.reranker_max_seq_len]
+                        .iter()
+                        .map(|&x| x as i64)
+                        .collect()
                 } else {
                     let mut padded: Vec<i64> = ids.iter().map(|&x| x as i64).collect();
                     padded.resize(self.reranker_max_seq_len, 0);
@@ -593,7 +602,7 @@ impl Analyzer {
 
             // Extract scores from the output tensor based on config
             let (shape, data) = outputs[0].try_extract_tensor::<f32>()?;
-            
+
             // Extract the relevance score based on the configured tensor index
             let scores: Vec<f32> = match self.config.reranker.score_tensor.as_str() {
                 "logits[0]" => {
@@ -608,7 +617,7 @@ impl Analyzer {
                         .collect()
                 }
             };
-            
+
             scores
         };
 
@@ -622,17 +631,18 @@ impl Analyzer {
             .enumerate()
             .map(|(i, _segment)| (i, scores[i]))
             .collect();
-        
+
         // Sort by score descending for preview
-        indexed_scores_preview.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        
+        indexed_scores_preview
+            .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
         // Log top 5 scores
         let top_5_preview: Vec<(usize, f32)> = indexed_scores_preview
             .iter()
             .take(5)
             .map(|(idx, score)| (*idx, *score))
             .collect();
-        
+
         info!("Top 5 rerank scores (index, score): {:?}", top_5_preview);
 
         // Create index-score pairs and sort by score (descending)

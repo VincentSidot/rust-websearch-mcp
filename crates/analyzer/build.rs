@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 fn main() -> anyhow::Result<()> {
     // Choose flavor via env: ORT_FLAVOR=cpu|gpu  (default: cpu)
     let flavor = env::var("ORT_FLAVOR").unwrap_or_else(|_| "cpu".into());
@@ -38,6 +38,21 @@ fn main() -> anyhow::Result<()> {
             _ => "Microsoft.ML.OnnxRuntime",
         };
         (pkg, rid, ".so")
+    };
+
+    #[cfg(target_os = "macos")]
+    let (pkg, rid, ext) = {
+        // ONNX Runtime GPU via NuGet isn't provided on macOS (no CUDA). Force CPU.
+        if flavor == "gpu" {
+            bail!("ORT_FLAVOR=gpu is not supported on macOS NuGet packages; use CPU flavor");
+        }
+        let rid = match env::var("CARGO_CFG_TARGET_ARCH")?.as_str() {
+            "x86_64" => "osx-x64",
+            "aarch64" => "osx-arm64",
+            other => bail!("Unsupported macOS arch for ORT: {other}"),
+        };
+        let pkg = "Microsoft.ML.OnnxRuntime";
+        (pkg, rid, ".dylib")
     };
 
     // Cache the .nupkg under OUT_DIR so subsequent builds are offline.
@@ -94,7 +109,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
 fn main() {
     // Prevent rerun every build on other OSes.
     println!("cargo:rerun-if-changed=build.rs");
