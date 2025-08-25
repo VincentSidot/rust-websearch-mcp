@@ -65,6 +65,17 @@ impl Analyzer {
     pub async fn new(config: AnalyzerConfig) -> Result<Self, Box<dyn std::error::Error>> {
         debug!("Initializing analyzer with config: {:?}", config);
 
+        {
+            // Init ort to the path
+            let path = config
+                .onnx_provider
+                .as_ref()
+                .and_then(|path| path.to_str())
+                .unwrap_or(ORT_DEFAULT_PATH);
+            info!("Loading ONNX provider: '{}'", path);
+            ort::init_from(path).commit()?;
+        }
+
         // Initialize cache
         let cache = EmbeddingCache::new(config.cache.clone())?;
         info!("Initialized embedding cache");
@@ -211,10 +222,10 @@ impl Analyzer {
         drop(self.reranker_session);
         drop(self.tokenizer);
         drop(self.reranker_tokenizer);
-        
+
         // Explicitly flush and close the cache
         self.cache.close()?;
-        
+
         Ok(())
     }
 
