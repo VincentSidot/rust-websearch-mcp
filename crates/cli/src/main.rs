@@ -6,20 +6,22 @@ pub fn redact_secrets(input: &str) -> String {
         r#"OPENAI_API_KEY=[^\s]*"#,
         r#"openai_api_key=[^\s]*"#,
     ];
-    
+
     let mut result = input.to_string();
     for pattern in &secret_patterns {
         let re = regex::Regex::new(pattern).unwrap();
-        result = re.replace_all(&result, |caps: &regex::Captures| {
-            let full_match = &caps[0];
-            if full_match.contains(':') {
-                // JSON format
-                full_match.split(':').next().unwrap().to_string() + ": \"[REDACTED]\""
-            } else {
-                // Environment variable format
-                full_match.split('=').next().unwrap().to_string() + "=[REDACTED]"
-            }
-        }).to_string();
+        result = re
+            .replace_all(&result, |caps: &regex::Captures| {
+                let full_match = &caps[0];
+                if full_match.contains(':') {
+                    // JSON format
+                    full_match.split(':').next().unwrap().to_string() + ": \"[REDACTED]\""
+                } else {
+                    // Environment variable format
+                    full_match.split('=').next().unwrap().to_string() + "=[REDACTED]"
+                }
+            })
+            .to_string();
     }
     result
 }
@@ -258,14 +260,26 @@ enum ConfigCommands {
 
 #[derive(Subcommand)]
 enum CacheCommands {
-    /// Show analyzer cache statistics
-    Stats,
-    /// Clear the analyzer cache
-    Clear,
-    /// Show summarizer cache statistics
-    SummaryStats,
-    /// Clear the summarizer cache
-    SummaryClear,
+    /// Show stats
+    Show {
+        #[clap(subcommand)]
+        subcommand: CacheTarget,
+    },
+    /// Clear cache
+    Clear {
+        #[clap(subcommand)]
+        subcommand: CacheTarget,
+    },
+}
+
+#[derive(Subcommand)]
+enum CacheTarget {
+    /// Target analyzer
+    Analyse,
+    /// Target summarizer
+    Summary,
+    /// Target all
+    All,
 }
 
 #[tokio::main]
@@ -373,27 +387,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await
         }
         Commands::Cache { subcommand } => match subcommand {
-            CacheCommands::Stats => {
-                cache_stats().await
-            }
-            CacheCommands::Clear => {
-                cache_clear().await
-            }
-            CacheCommands::SummaryStats => {
-                summary_cache_stats().await
-            }
-            CacheCommands::SummaryClear => {
-                summary_cache_clear().await
-            }
+            CacheCommands::Show { subcommand } => match subcommand {
+                CacheTarget::Analyse => analyze_cache_stats().await,
+                CacheTarget::Summary => summary_cache_stats().await,
+                CacheTarget::All => {
+                    analyze_cache_stats().await?;
+                    summary_cache_stats().await?;
+                    Ok(())
+                }
+            },
+            CacheCommands::Clear { subcommand } => match subcommand {
+                CacheTarget::Analyse => analyze_cache_clear().await,
+                CacheTarget::Summary => summary_cache_clear().await,
+                CacheTarget::All => {
+                    analyze_cache_clear().await?;
+                    summary_cache_clear().await?;
+                    Ok(())
+                }
+            },
         },
-        Commands::Health {} => {
-            health_check().await
-        }
+        Commands::Health {} => health_check().await,
         Commands::Config { subcommand } => match subcommand {
-            ConfigCommands::Print { json } => {
-                config_print(json).await
-            }
-        }
+            ConfigCommands::Print { json } => config_print(json).await,
+        },
     };
 
     // Handle the result
@@ -579,22 +595,30 @@ async fn summarize_document(
 
     // Override map-reduce config from environment if not provided via CLI
     if max_context_tokens.is_none() {
-        if let Ok(val) = std::env::var("MAP_REDUCE_MAX_CONTEXT_TOKENS").map(|v| v.parse::<usize>().unwrap_or(6000)) {
+        if let Ok(val) = std::env::var("MAP_REDUCE_MAX_CONTEXT_TOKENS")
+            .map(|v| v.parse::<usize>().unwrap_or(6000))
+        {
             config.map_reduce.max_context_tokens = val;
         }
     }
     if map_group_tokens.is_none() {
-        if let Ok(val) = std::env::var("MAP_REDUCE_MAP_GROUP_TOKENS").map(|v| v.parse::<usize>().unwrap_or(1000)) {
+        if let Ok(val) =
+            std::env::var("MAP_REDUCE_MAP_GROUP_TOKENS").map(|v| v.parse::<usize>().unwrap_or(1000))
+        {
             config.map_reduce.map_group_tokens = val;
         }
     }
     if reduce_target_words.is_none() {
-        if let Ok(val) = std::env::var("MAP_REDUCE_REDUCE_TARGET_WORDS").map(|v| v.parse::<usize>().unwrap_or(200)) {
+        if let Ok(val) = std::env::var("MAP_REDUCE_REDUCE_TARGET_WORDS")
+            .map(|v| v.parse::<usize>().unwrap_or(200))
+        {
             config.map_reduce.reduce_target_words = val;
         }
     }
     if concurrency.is_none() {
-        if let Ok(val) = std::env::var("MAP_REDUCE_CONCURRENCY").map(|v| v.parse::<usize>().unwrap_or(4)) {
+        if let Ok(val) =
+            std::env::var("MAP_REDUCE_CONCURRENCY").map(|v| v.parse::<usize>().unwrap_or(4))
+        {
             config.map_reduce.concurrency = val;
         }
     }
@@ -760,7 +784,8 @@ async fn run_pipeline(
     );
 
     // Get analyzer cache stats
-    let (_analyzer_hits, _analyzer_misses, analyzer_hit_rate) = analyzer.cache().get_hit_miss_stats();
+    let (_analyzer_hits, _analyzer_misses, analyzer_hit_rate) =
+        analyzer.cache().get_hit_miss_stats();
 
     // Explicitly shutdown the analyzer to ensure proper cleanup
     analyzer.shutdown()?;
@@ -810,22 +835,30 @@ async fn run_pipeline(
 
     // Override map-reduce config from environment if not provided via CLI
     if max_context_tokens.is_none() {
-        if let Ok(val) = std::env::var("MAP_REDUCE_MAX_CONTEXT_TOKENS").map(|v| v.parse::<usize>().unwrap_or(6000)) {
+        if let Ok(val) = std::env::var("MAP_REDUCE_MAX_CONTEXT_TOKENS")
+            .map(|v| v.parse::<usize>().unwrap_or(6000))
+        {
             summarizer_config.map_reduce.max_context_tokens = val;
         }
     }
     if map_group_tokens.is_none() {
-        if let Ok(val) = std::env::var("MAP_REDUCE_MAP_GROUP_TOKENS").map(|v| v.parse::<usize>().unwrap_or(1000)) {
+        if let Ok(val) =
+            std::env::var("MAP_REDUCE_MAP_GROUP_TOKENS").map(|v| v.parse::<usize>().unwrap_or(1000))
+        {
             summarizer_config.map_reduce.map_group_tokens = val;
         }
     }
     if reduce_target_words.is_none() {
-        if let Ok(val) = std::env::var("MAP_REDUCE_REDUCE_TARGET_WORDS").map(|v| v.parse::<usize>().unwrap_or(200)) {
+        if let Ok(val) = std::env::var("MAP_REDUCE_REDUCE_TARGET_WORDS")
+            .map(|v| v.parse::<usize>().unwrap_or(200))
+        {
             summarizer_config.map_reduce.reduce_target_words = val;
         }
     }
     if concurrency.is_none() {
-        if let Ok(val) = std::env::var("MAP_REDUCE_CONCURRENCY").map(|v| v.parse::<usize>().unwrap_or(4)) {
+        if let Ok(val) =
+            std::env::var("MAP_REDUCE_CONCURRENCY").map(|v| v.parse::<usize>().unwrap_or(4))
+        {
             summarizer_config.map_reduce.concurrency = val;
         }
     }
@@ -911,15 +944,28 @@ async fn run_pipeline(
     println!("Scraping time: {} ms", metrics.scrape_duration_ms);
     println!("Analysis time: {} ms", metrics.analyze_duration_ms);
     println!("Summarization time: {} ms", metrics.summarize_duration_ms);
-    println!("Analyzer cache hit rate: {:.2}%", metrics.analyzer_cache_hit_rate * 100.0);
-    println!("Summarizer cache hit: {}", if metrics.summarizer_cache_hit { "Yes" } else { "No" });
+    println!(
+        "Analyzer cache hit rate: {:.2}%",
+        metrics.analyzer_cache_hit_rate * 100.0
+    );
+    println!(
+        "Summarizer cache hit: {}",
+        if metrics.summarizer_cache_hit {
+            "Yes"
+        } else {
+            "No"
+        }
+    );
     if metrics.input_tokens > 0 {
         println!("Input tokens: {}", metrics.input_tokens);
     }
     if metrics.output_tokens > 0 {
         println!("Output tokens: {}", metrics.output_tokens);
     }
-    println!("Average pairwise cosine similarity: {:.4}", metrics.avg_pairwise_cosine);
+    println!(
+        "Average pairwise cosine similarity: {:.4}",
+        metrics.avg_pairwise_cosine
+    );
 
     // Output metrics as JSON if requested
     if let Some(metrics_json_path) = metrics_json {
@@ -939,33 +985,33 @@ async fn run_pipeline(
     // Start metrics server if requested
     if let Some(port) = metrics_port {
         println!("\nStarting metrics server on port {}", port);
-        
+
         // Create a shared metrics object
         let shared_metrics = Arc::new(Mutex::new(metrics.clone()));
-        
+
         // Create a route to serve metrics
-        let metrics_route = warp::path("metrics")
-            .and_then(move || {
-                let metrics_clone = shared_metrics.clone();
-                async move {
-                    let metrics = metrics_clone.lock().await;
-                    match serde_json::to_string_pretty(&*metrics) {
-                        Ok(json) => Ok(warp::reply::json(&json)),
-                        Err(_) => Err(warp::reject::custom(MetricsError))
-                    }
+        let metrics_route = warp::path("metrics").and_then(move || {
+            let metrics_clone = shared_metrics.clone();
+            async move {
+                let metrics = metrics_clone.lock().await;
+                match serde_json::to_string_pretty(&*metrics) {
+                    Ok(json) => Ok(warp::reply::json(&json)),
+                    Err(_) => Err(warp::reject::custom(MetricsError)),
                 }
-            });
-        
+            }
+        });
+
         // Start the server in a background task
         tokio::spawn(async move {
-            warp::serve(metrics_route)
-                .run(([127, 0, 0, 1], port))
-                .await;
+            warp::serve(metrics_route).run(([127, 0, 0, 1], port)).await;
         });
-        
+
         // Give the server a moment to start
         tokio::time::sleep(Duration::from_millis(100)).await;
-        println!("Metrics server started. Access metrics at http://localhost:{}/metrics", port);
+        println!(
+            "Metrics server started. Access metrics at http://localhost:{}/metrics",
+            port
+        );
     }
 
     // Print completion info
@@ -987,7 +1033,7 @@ async fn run_pipeline(
 }
 
 /// Show cache statistics
-async fn cache_stats() -> Result<(), Box<dyn std::error::Error>> {
+async fn analyze_cache_stats() -> Result<(), Box<dyn std::error::Error>> {
     // Create default analyzer config to get cache path
     let config = analyzer::config::AnalyzerConfig::new();
 
@@ -1005,7 +1051,7 @@ async fn cache_stats() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Clear the cache
-async fn cache_clear() -> Result<(), Box<dyn std::error::Error>> {
+async fn analyze_cache_clear() -> Result<(), Box<dyn std::error::Error>> {
     // Create default analyzer config to get cache path
     let config = analyzer::config::AnalyzerConfig::new();
 
@@ -1057,10 +1103,10 @@ async fn summary_cache_clear() -> Result<(), Box<dyn std::error::Error>> {
 /// Health check command
 async fn health_check() -> Result<(), Box<dyn std::error::Error>> {
     println!("Running health check...");
-    
+
     // Load environment
     utils::env::load_env();
-    
+
     // Report active sources
     println!("\n--- Configuration Sources ---");
     if let Ok(env_file) = std::env::var("ENV_FILE") {
@@ -1068,7 +1114,7 @@ async fn health_check() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         println!("Environment file: .env (default)");
     }
-    
+
     // Show environment variables (redacted)
     println!("Environment variables:");
     let env_vars = [
@@ -1085,7 +1131,7 @@ async fn health_check() -> Result<(), Box<dyn std::error::Error>> {
         "SUMMARY_CACHE_PATH",
         "SUMMARY_CACHE_TTL_DAYS",
     ];
-    
+
     for var in &env_vars {
         if let Ok(value) = std::env::var(var) {
             let display_value = if var.contains("API_KEY") {
@@ -1096,19 +1142,22 @@ async fn health_check() -> Result<(), Box<dyn std::error::Error>> {
             println!("  {}: {}", var, display_value);
         }
     }
-    
+
     // Analyzer checks
     println!("\n--- Analyzer Checks ---");
-    
+
     // Create analyzer configuration
     let analyzer_config = analyzer::config::AnalyzerConfig::new();
     let analyzer_config_clone = analyzer_config.clone();
-    
+
     // Check model files
     println!("Checking embedder model files...");
     match analyzer::model::resolve_model(&analyzer_config).await {
         Ok(resolved_model) => {
-            println!("  ✓ Embedder model resolved: {}", resolved_model.fingerprint);
+            println!(
+                "  ✓ Embedder model resolved: {}",
+                resolved_model.fingerprint
+            );
             println!("  ✓ Model files:");
             for path in &resolved_model.file_paths {
                 if path.exists() {
@@ -1118,14 +1167,14 @@ async fn health_check() -> Result<(), Box<dyn std::error::Error>> {
                     std::process::exit(1);
                 }
             }
-            
+
             // Try to create ONNX session
             println!("  Creating ONNX session...");
             match analyzer::Analyzer::new(analyzer_config_clone).await {
                 Ok(analyzer) => {
                     println!("  ✓ ONNX session created successfully");
                     println!("  ✓ Model fingerprint: {}", analyzer.model_fingerprint());
-                    
+
                     // Shutdown analyzer
                     if let Err(e) = analyzer.shutdown() {
                         println!("  ⚠ Warning: Error shutting down analyzer: {}", e);
@@ -1142,17 +1191,20 @@ async fn health_check() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(1);
         }
     }
-    
+
     // Check reranker if enabled
     let analyzer_config_for_reranker = analyzer::config::AnalyzerConfig::new();
     if analyzer_config_for_reranker.rerank && analyzer_config_for_reranker.reranker.enabled {
         println!("Checking reranker model files...");
         let mut reranker_config = analyzer_config_for_reranker.clone();
         reranker_config.model = analyzer_config_for_reranker.reranker.model.clone();
-        
+
         match analyzer::model::resolve_model(&reranker_config).await {
             Ok(resolved_model) => {
-                println!("  ✓ Reranker model resolved: {}", resolved_model.fingerprint);
+                println!(
+                    "  ✓ Reranker model resolved: {}",
+                    resolved_model.fingerprint
+                );
                 println!("  ✓ Model files:");
                 for path in &resolved_model.file_paths {
                     if path.exists() {
@@ -1169,66 +1221,68 @@ async fn health_check() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    
+
     // Cache checks
     println!("\n--- Cache Checks ---");
-    
+
     // Analyzer cache
     let analyzer_config_for_cache = analyzer::config::AnalyzerConfig::new();
     println!("Checking analyzer cache...");
     match analyzer::cache::EmbeddingCache::new(analyzer_config_for_cache.cache.clone()) {
-        Ok(cache) => {
-            match cache.get_stats() {
-                Ok(stats) => {
-                    println!("  ✓ Analyzer cache accessible");
-                    println!("  ✓ Entry count: {}", stats.entry_count);
-                    println!("  ✓ Estimated size: {} bytes", stats.total_size_bytes);
-                }
-                Err(e) => {
-                    println!("  ⚠ Warning: Could not get analyzer cache stats: {}", e);
-                }
+        Ok(cache) => match cache.get_stats() {
+            Ok(stats) => {
+                println!("  ✓ Analyzer cache accessible");
+                println!("  ✓ Entry count: {}", stats.entry_count);
+                println!("  ✓ Estimated size: {} bytes", stats.total_size_bytes);
             }
-        }
+            Err(e) => {
+                println!("  ⚠ Warning: Could not get analyzer cache stats: {}", e);
+            }
+        },
         Err(e) => {
             println!("  ✗ Failed to initialize analyzer cache: {}", e);
             std::process::exit(1);
         }
     }
-    
+
     // Summarizer cache
     println!("Checking summarizer cache...");
     let summarizer_config = summarizer::config::SummarizerConfig::new();
     match summarizer::cache::SummarizerCache::new(summarizer_config.cache.clone()) {
-        Ok(cache) => {
-            match cache.get_stats() {
-                Ok(stats) => {
-                    println!("  ✓ Summarizer cache accessible");
-                    println!("  ✓ Entry count: {}", stats.entry_count);
-                    println!("  ✓ Estimated size: {} bytes", stats.total_size_bytes);
-                }
-                Err(e) => {
-                    println!("  ⚠ Warning: Could not get summarizer cache stats: {}", e);
-                }
+        Ok(cache) => match cache.get_stats() {
+            Ok(stats) => {
+                println!("  ✓ Summarizer cache accessible");
+                println!("  ✓ Entry count: {}", stats.entry_count);
+                println!("  ✓ Estimated size: {} bytes", stats.total_size_bytes);
             }
-        }
+            Err(e) => {
+                println!("  ⚠ Warning: Could not get summarizer cache stats: {}", e);
+            }
+        },
         Err(e) => {
             println!("  ✗ Failed to initialize summarizer cache: {}", e);
             std::process::exit(1);
         }
     }
-    
+
     // Summarizer checks
     println!("\n--- Summarizer Checks ---");
-    
+
     // Check base URL reachability
-    let base_url = std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+    let base_url = std::env::var("OPENAI_BASE_URL")
+        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
     println!("Checking summarizer base URL: {}", base_url);
-    
+
     // Try to create a simple HTTP client and make a request to the base URL
     let client = reqwest::Client::new();
     let test_url = format!("{}/models", base_url.trim_end_matches('/'));
-    
-    match tokio::time::timeout(std::time::Duration::from_secs(5), client.get(&test_url).send()).await {
+
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        client.get(&test_url).send(),
+    )
+    .await
+    {
         Ok(Ok(response)) => {
             if response.status().is_success() {
                 println!("  ✓ Base URL is reachable");
@@ -1243,7 +1297,7 @@ async fn health_check() -> Result<(), Box<dyn std::error::Error>> {
             println!("  ⚠ Warning: Base URL check timed out");
         }
     }
-    
+
     // Check API key
     match std::env::var("OPENAI_API_KEY") {
         Ok(api_key) if !api_key.is_empty() => {
@@ -1253,7 +1307,7 @@ async fn health_check() -> Result<(), Box<dyn std::error::Error>> {
             println!("  ⚠ API key missing (summarizer will be DEGRADED)");
         }
     }
-    
+
     println!("\n--- Health Check Complete ---");
     println!("Status: OK");
     Ok(())
@@ -1263,11 +1317,11 @@ async fn health_check() -> Result<(), Box<dyn std::error::Error>> {
 async fn config_print(json: bool) -> Result<(), Box<dyn std::error::Error>> {
     // Load environment
     utils::env::load_env();
-    
+
     // Create configurations
     let analyzer_config = analyzer::config::AnalyzerConfig::new();
     let summarizer_config = summarizer::config::SummarizerConfig::new();
-    
+
     if json {
         // Create a combined config struct for JSON output
         #[derive(Serialize)]
@@ -1275,12 +1329,12 @@ async fn config_print(json: bool) -> Result<(), Box<dyn std::error::Error>> {
             analyzer: analyzer::config::AnalyzerConfig,
             summarizer: summarizer::config::SummarizerConfig,
         }
-        
+
         let combined = CombinedConfig {
             analyzer: analyzer_config,
             summarizer: summarizer_config,
         };
-        
+
         // Serialize to JSON and redact secrets
         let json_str = serde_json::to_string_pretty(&combined)?;
         let redacted = redact_secrets(&json_str);
@@ -1295,7 +1349,8 @@ async fn config_print(json: bool) -> Result<(), Box<dyn std::error::Error>> {
         println!("Rerank enabled: {}", analyzer_config.rerank);
         if analyzer_config.rerank {
             println!("Reranker top M: {}", analyzer_config.reranker.top_m);
-            println!("Reranker model fingerprint: {}", 
+            println!(
+                "Reranker model fingerprint: {}",
                 match &analyzer_config.reranker.model {
                     analyzer::config::ModelConfig::HuggingFace(hf_config) => {
                         format!("{}@{}", hf_config.repo_id, hf_config.revision)
@@ -1312,7 +1367,7 @@ async fn config_print(json: bool) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ttl) = analyzer_config.cache.ttl_days {
             println!("Cache TTL: {} days", ttl);
         }
-        
+
         println!("\n=== Summarizer Configuration ===");
         println!("Base URL: {}", summarizer_config.base_url);
         println!("Model: {}", summarizer_config.model);
@@ -1320,22 +1375,39 @@ async fn config_print(json: bool) -> Result<(), Box<dyn std::error::Error>> {
         println!("Temperature: {}", summarizer_config.temperature);
         println!("Style: {:?}", summarizer_config.style);
         match summarizer_config.style {
-            summarizer::config::SummaryStyle::AbstractWithBullets => println!("  (Abstract summary with bullet points)"),
+            summarizer::config::SummaryStyle::AbstractWithBullets => {
+                println!("  (Abstract summary with bullet points)")
+            }
             summarizer::config::SummaryStyle::TlDr => println!("  (TL;DR style summary)"),
             summarizer::config::SummaryStyle::Extractive => println!("  (Extractive summary)"),
         }
         println!("API key present: {}", summarizer_config.api_key.is_some());
-        println!("Map-reduce enabled: {}", summarizer_config.map_reduce.enabled);
+        println!(
+            "Map-reduce enabled: {}",
+            summarizer_config.map_reduce.enabled
+        );
         if summarizer_config.map_reduce.enabled {
-            println!("Map-reduce max context tokens: {}", summarizer_config.map_reduce.max_context_tokens);
-            println!("Map-reduce map group tokens: {}", summarizer_config.map_reduce.map_group_tokens);
-            println!("Map-reduce reduce target words: {}", summarizer_config.map_reduce.reduce_target_words);
-            println!("Map-reduce concurrency: {}", summarizer_config.map_reduce.concurrency);
+            println!(
+                "Map-reduce max context tokens: {}",
+                summarizer_config.map_reduce.max_context_tokens
+            );
+            println!(
+                "Map-reduce map group tokens: {}",
+                summarizer_config.map_reduce.map_group_tokens
+            );
+            println!(
+                "Map-reduce reduce target words: {}",
+                summarizer_config.map_reduce.reduce_target_words
+            );
+            println!(
+                "Map-reduce concurrency: {}",
+                summarizer_config.map_reduce.concurrency
+            );
         }
         println!("Cache enabled: {}", summarizer_config.cache.enabled);
         println!("Cache path: {}", summarizer_config.cache.path);
         println!("Cache TTL: {} days", summarizer_config.cache.ttl_days);
-        
+
         // Environment variables that override config
         println!("\n=== Environment Variables ===");
         let env_vars = [
@@ -1344,15 +1416,21 @@ async fn config_print(json: bool) -> Result<(), Box<dyn std::error::Error>> {
             ("OPENAI_API_KEY", "Summarizer API key"),
             ("ANALYZER_ALLOW_DOWNLOADS", "Allow model downloads"),
             ("MAP_REDUCE_ENABLED", "Enable map-reduce"),
-            ("MAP_REDUCE_MAX_CONTEXT_TOKENS", "Map-reduce max context tokens"),
+            (
+                "MAP_REDUCE_MAX_CONTEXT_TOKENS",
+                "Map-reduce max context tokens",
+            ),
             ("MAP_REDUCE_MAP_GROUP_TOKENS", "Map-reduce map group tokens"),
-            ("MAP_REDUCE_REDUCE_TARGET_WORDS", "Map-reduce reduce target words"),
+            (
+                "MAP_REDUCE_REDUCE_TARGET_WORDS",
+                "Map-reduce reduce target words",
+            ),
             ("MAP_REDUCE_CONCURRENCY", "Map-reduce concurrency"),
             ("SUMMARY_CACHE_ENABLED", "Enable summarizer cache"),
             ("SUMMARY_CACHE_PATH", "Summarizer cache path"),
             ("SUMMARY_CACHE_TTL_DAYS", "Summarizer cache TTL"),
         ];
-        
+
         for (var, description) in &env_vars {
             if let Ok(value) = std::env::var(var) {
                 let display_value = if var.contains("API_KEY") {
@@ -1364,6 +1442,6 @@ async fn config_print(json: bool) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    
+
     Ok(())
 }
