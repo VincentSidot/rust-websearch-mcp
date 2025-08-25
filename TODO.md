@@ -210,7 +210,7 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
 
 - [x] Summarization via an **OpenAI-compatible API** (LM Studio/Ollama/remote).
 - [x] Configurable: base URL, API key (env), model id, style (abstract/bullets/TL;DR), timeouts.
-- [ ] **Map-reduce** mode for large docs (chunk summaries → merge).
+- [x] **Map-reduce** mode for large docs (chunk summaries → merge).
 - [x] Extractive fallback when API errors/timeout (stitch top sentences).
 
 **Crates**: `reqwest`, `tokio`, `serde_json`, optional `retry`/`backoff`
@@ -232,6 +232,17 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
   - Added unit tests for core functionality including mock API tests and timeout tests
   - Verified that the workspace builds successfully and all tests pass
   - Performance note: API calls take variable time depending on the LLM service; fallback is nearly instantaneous
+
+- **2025-08-25**: Step 3B: Summarizer — map-reduce summarization (token budgeting, citations, CLI flags)
+  - Added map-reduce configuration options: `enabled`, `max_context_tokens`, `map_group_tokens`, `reduce_target_words`, `concurrency`
+  - Implemented token budgeting to automatically switch to map-reduce when input exceeds `max_context_tokens`
+  - Added map stage to partition segments into groups and generate micro-summaries with ordered citations
+  - Added reduce stage to merge micro-summaries into a final abstract with bullets
+  - Extended CLI with flags: `--map-reduce`, `--max-context-tokens`, `--map-group-tokens`, `--reduce-target-words`, `--concurrency`
+  - Updated both `summarize` and `run` CLI commands to support map-reduce flags
+  - Added metrics tracking for map-reduce mode including mode, map calls, concurrency, and timing
+  - Preserved single-pass behavior for small inputs with no regression
+  - Environment variables take precedence over config values for map-reduce settings
 
 ---
 

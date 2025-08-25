@@ -100,6 +100,40 @@ model = "gpt-3.5-turbo"
 timeout_ms = 30000
 ```
 
+## Map-Reduce Summarization
+
+For longer documents that exceed the context window of the LLM, the summarizer can automatically switch to a map-reduce approach:
+
+1. **Map Stage**: The selected segments are partitioned into groups based on token limits. Each group is summarized individually to create micro-summaries.
+2. **Reduce Stage**: The micro-summaries are merged into a final comprehensive summary with bullets.
+
+### When Map-Reduce Triggers
+
+Map-reduce summarization is automatically triggered when:
+- The total estimated tokens of selected segments exceeds the `map_reduce.max_context_tokens` threshold (default: 6000 tokens)
+- Map-reduce is explicitly enabled with the `--map-reduce` flag
+
+### Tuning Thresholds
+
+You can adjust the map-reduce behavior using these parameters:
+
+- `--max-context-tokens <n>`: Maximum context tokens before switching to map-reduce (default: 6000)
+- `--map-group-tokens <n>`: Maximum tokens per map call (default: 1000)
+- `--reduce-target-words <n>`: Target words for the reduce stage (default: 200)
+- `--concurrency <n>`: Concurrency limit for map calls (default: 4)
+
+These parameters can also be set via environment variables:
+- `MAP_REDUCE_MAX_CONTEXT_TOKENS`
+- `MAP_REDUCE_MAP_GROUP_TOKENS`
+- `MAP_REDUCE_REDUCE_TARGET_WORDS`
+- `MAP_REDUCE_CONCURRENCY`
+
+Example usage:
+```bash
+# Enable map-reduce with custom thresholds
+cargo run --bin cli -- run --map-reduce --max-context-tokens 4000 --map-group-tokens 800 <url>
+```
+
 ## Reranker
 
 The analyzer supports an optional cross-encoder reranker that can improve the precision of selected segments. The reranker is off by default and can be enabled with the `--rerank` flag.

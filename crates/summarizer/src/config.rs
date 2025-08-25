@@ -31,6 +31,9 @@ pub struct SummarizerConfig {
     /// API key for the LLM API (loaded from environment)
     #[serde(skip)]
     pub api_key: Option<String>,
+
+    /// Map-reduce configuration
+    pub map_reduce: MapReduceConfig,
 }
 
 /// Style of summary to generate
@@ -47,6 +50,21 @@ pub enum SummaryStyle {
     Extractive,
 }
 
+/// Configuration for map-reduce summarization
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MapReduceConfig {
+    /// Whether map-reduce is enabled
+    pub enabled: bool,
+    /// Maximum context tokens before switching to map-reduce
+    pub max_context_tokens: usize,
+    /// Maximum tokens per map call
+    pub map_group_tokens: usize,
+    /// Target words for the reduce stage
+    pub reduce_target_words: usize,
+    /// Concurrency limit for map calls
+    pub concurrency: usize,
+}
+
 impl SummarizerConfig {
     /// Create a new SummarizerConfig with default values
     pub fn new() -> Self {
@@ -58,6 +76,13 @@ impl SummarizerConfig {
             max_tokens: None,
             style: SummaryStyle::AbstractWithBullets,
             api_key: None,
+            map_reduce: MapReduceConfig {
+                enabled: false,
+                max_context_tokens: 6000,
+                map_group_tokens: 1000,
+                reduce_target_words: 200,
+                concurrency: 4,
+            },
         }
     }
 
@@ -94,12 +119,60 @@ impl SummarizerConfig {
                         _ => SummaryStyle::AbstractWithBullets, // Default
                     }
                 }
+                "map_reduce.enabled" => {
+                    if let Ok(val) = value.parse::<bool>() {
+                        config.map_reduce.enabled = val;
+                    }
+                }
+                "map_reduce.max_context_tokens" => {
+                    if let Ok(val) = value.parse::<usize>() {
+                        config.map_reduce.max_context_tokens = val;
+                    }
+                }
+                "map_reduce.map_group_tokens" => {
+                    if let Ok(val) = value.parse::<usize>() {
+                        config.map_reduce.map_group_tokens = val;
+                    }
+                }
+                "map_reduce.reduce_target_words" => {
+                    if let Ok(val) = value.parse::<usize>() {
+                        config.map_reduce.reduce_target_words = val;
+                    }
+                }
+                "map_reduce.concurrency" => {
+                    if let Ok(val) = value.parse::<usize>() {
+                        config.map_reduce.concurrency = val;
+                    }
+                }
                 _ => {} // Ignore unknown keys
             }
         }
 
         // Load API key from environment
         config.api_key = env::var("OPENAI_API_KEY").ok();
+
+        // Load map-reduce config from environment (higher precedence)
+        if let Ok(val) = env::var("MAP_REDUCE_ENABLED").map(|v| v.parse::<bool>().unwrap_or(false)) {
+            config.map_reduce.enabled = val;
+        }
+        if let Ok(val) = env::var("MAP_REDUCE_MAX_CONTEXT_TOKENS")
+            .map(|v| v.parse::<usize>().unwrap_or(6000))
+        {
+            config.map_reduce.max_context_tokens = val;
+        }
+        if let Ok(val) = env::var("MAP_REDUCE_MAP_GROUP_TOKENS")
+            .map(|v| v.parse::<usize>().unwrap_or(1000))
+        {
+            config.map_reduce.map_group_tokens = val;
+        }
+        if let Ok(val) = env::var("MAP_REDUCE_REDUCE_TARGET_WORDS")
+            .map(|v| v.parse::<usize>().unwrap_or(200))
+        {
+            config.map_reduce.reduce_target_words = val;
+        }
+        if let Ok(val) = env::var("MAP_REDUCE_CONCURRENCY").map(|v| v.parse::<usize>().unwrap_or(4)) {
+            config.map_reduce.concurrency = val;
+        }
 
         config
     }

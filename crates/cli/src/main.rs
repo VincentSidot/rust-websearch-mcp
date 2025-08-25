@@ -80,6 +80,26 @@ enum Commands {
         /// Temperature for sampling
         #[clap(long, default_value = "0.2")]
         temperature: f32,
+
+        /// Enable map-reduce summarization
+        #[clap(long)]
+        map_reduce: bool,
+
+        /// Maximum context tokens before switching to map-reduce
+        #[clap(long)]
+        max_context_tokens: Option<usize>,
+
+        /// Maximum tokens per map call
+        #[clap(long)]
+        map_group_tokens: Option<usize>,
+
+        /// Target words for the reduce stage
+        #[clap(long)]
+        reduce_target_words: Option<usize>,
+
+        /// Concurrency limit for map calls
+        #[clap(long)]
+        concurrency: Option<usize>,
     },
     /// Run the full pipeline
     Run {
@@ -117,6 +137,26 @@ enum Commands {
         /// Path to configuration file
         #[clap(long)]
         config: Option<String>,
+
+        /// Enable map-reduce summarization
+        #[clap(long)]
+        map_reduce: bool,
+
+        /// Maximum context tokens before switching to map-reduce
+        #[clap(long)]
+        max_context_tokens: Option<usize>,
+
+        /// Maximum tokens per map call
+        #[clap(long)]
+        map_group_tokens: Option<usize>,
+
+        /// Target words for the reduce stage
+        #[clap(long)]
+        reduce_target_words: Option<usize>,
+
+        /// Concurrency limit for map calls
+        #[clap(long)]
+        concurrency: Option<usize>,
 
         /// ONNX Provider to use, if not set it will try fetch one in current directory
         #[clap(long)]
@@ -180,8 +220,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             style,
             timeout_ms,
             temperature,
+            map_reduce,
+            max_context_tokens,
+            map_group_tokens,
+            reduce_target_words,
+            concurrency,
         } => {
-            summarize_document(&analysis, &document, &style, timeout_ms, temperature).await
+            summarize_document(
+                &analysis,
+                &document,
+                &style,
+                timeout_ms,
+                temperature,
+                map_reduce,
+                max_context_tokens,
+                map_group_tokens,
+                reduce_target_words,
+                concurrency,
+            )
+            .await
         }
         Commands::Run {
             url,
@@ -194,6 +251,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             timeout_ms,
             config: _config,
             onnx_provider,
+            map_reduce,
+            max_context_tokens,
+            map_group_tokens,
+            reduce_target_words,
+            concurrency,
         } => {
             run_pipeline(
                 &url,
@@ -205,6 +267,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &style,
                 timeout_ms,
                 onnx_provider,
+                map_reduce,
+                max_context_tokens,
+                map_group_tokens,
+                reduce_target_words,
+                concurrency,
             )
             .await
         }
@@ -335,6 +402,11 @@ async fn summarize_document(
     style: &str,
     timeout_ms: u64,
     temperature: f32,
+    map_reduce: bool,
+    max_context_tokens: Option<usize>,
+    map_group_tokens: Option<usize>,
+    reduce_target_words: Option<usize>,
+    concurrency: Option<usize>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     logger::init_logger(); // Setup logger
     println!("Summarizing document");
@@ -369,7 +441,7 @@ async fn summarize_document(
         std::env::var("OPENAI_BASE_URL")
     );
 
-    let config = summarizer::config::SummarizerConfig {
+    let mut config = summarizer::config::SummarizerConfig {
         base_url: std::env::var("OPENAI_BASE_URL").expect("Missing OPENAI_BASE_URL"),
         model: std::env::var("OPENAI_MODEL").expect("Missing OPENAI_MODEL"),
         timeout_ms,
@@ -377,7 +449,36 @@ async fn summarize_document(
         max_tokens: None, // Not configurable via CLI in this MVP
         style: style_enum,
         api_key: std::env::var("OPENAI_API_KEY").ok(),
+        map_reduce: summarizer::config::MapReduceConfig {
+            enabled: map_reduce,
+            max_context_tokens: max_context_tokens.unwrap_or(6000),
+            map_group_tokens: map_group_tokens.unwrap_or(1000),
+            reduce_target_words: reduce_target_words.unwrap_or(200),
+            concurrency: concurrency.unwrap_or(4),
+        },
     };
+
+    // Override map-reduce config from environment if not provided via CLI
+    if max_context_tokens.is_none() {
+        if let Ok(val) = std::env::var("MAP_REDUCE_MAX_CONTEXT_TOKENS").map(|v| v.parse::<usize>().unwrap_or(6000)) {
+            config.map_reduce.max_context_tokens = val;
+        }
+    }
+    if map_group_tokens.is_none() {
+        if let Ok(val) = std::env::var("MAP_REDUCE_MAP_GROUP_TOKENS").map(|v| v.parse::<usize>().unwrap_or(1000)) {
+            config.map_reduce.map_group_tokens = val;
+        }
+    }
+    if reduce_target_words.is_none() {
+        if let Ok(val) = std::env::var("MAP_REDUCE_REDUCE_TARGET_WORDS").map(|v| v.parse::<usize>().unwrap_or(200)) {
+            config.map_reduce.reduce_target_words = val;
+        }
+    }
+    if concurrency.is_none() {
+        if let Ok(val) = std::env::var("MAP_REDUCE_CONCURRENCY").map(|v| v.parse::<usize>().unwrap_or(4)) {
+            config.map_reduce.concurrency = val;
+        }
+    }
 
     // Log config info
     println!("Model: {}", config.model);
@@ -419,6 +520,11 @@ async fn run_pipeline(
     style: &str,
     timeout_ms: u64,
     onnx_provider: Option<PathBuf>,
+    map_reduce: bool,
+    max_context_tokens: Option<usize>,
+    map_group_tokens: Option<usize>,
+    reduce_target_words: Option<usize>,
+    concurrency: Option<usize>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use websearch::{scrape_webpage, scraped_to_document};
 
@@ -545,7 +651,7 @@ async fn run_pipeline(
         _ => summarizer::config::SummaryStyle::AbstractWithBullets, // Default
     };
 
-    let summarizer_config = summarizer::config::SummarizerConfig {
+    let mut summarizer_config = summarizer::config::SummarizerConfig {
         base_url: std::env::var("OPENAI_BASE_URL").expect("Missing OPENAI_BASE_URL key"),
         model: std::env::var("OPENAI_MODEL").expect("Missing OPENAI_MODEL key"),
         timeout_ms,
@@ -553,7 +659,36 @@ async fn run_pipeline(
         max_tokens: None, // Not configurable via CLI in this MVP
         style: style_enum,
         api_key: std::env::var("OPENAI_API_KEY").ok(),
+        map_reduce: summarizer::config::MapReduceConfig {
+            enabled: map_reduce,
+            max_context_tokens: max_context_tokens.unwrap_or(6000),
+            map_group_tokens: map_group_tokens.unwrap_or(1000),
+            reduce_target_words: reduce_target_words.unwrap_or(200),
+            concurrency: concurrency.unwrap_or(4),
+        },
     };
+
+    // Override map-reduce config from environment if not provided via CLI
+    if max_context_tokens.is_none() {
+        if let Ok(val) = std::env::var("MAP_REDUCE_MAX_CONTEXT_TOKENS").map(|v| v.parse::<usize>().unwrap_or(6000)) {
+            summarizer_config.map_reduce.max_context_tokens = val;
+        }
+    }
+    if map_group_tokens.is_none() {
+        if let Ok(val) = std::env::var("MAP_REDUCE_MAP_GROUP_TOKENS").map(|v| v.parse::<usize>().unwrap_or(1000)) {
+            summarizer_config.map_reduce.map_group_tokens = val;
+        }
+    }
+    if reduce_target_words.is_none() {
+        if let Ok(val) = std::env::var("MAP_REDUCE_REDUCE_TARGET_WORDS").map(|v| v.parse::<usize>().unwrap_or(200)) {
+            summarizer_config.map_reduce.reduce_target_words = val;
+        }
+    }
+    if concurrency.is_none() {
+        if let Ok(val) = std::env::var("MAP_REDUCE_CONCURRENCY").map(|v| v.parse::<usize>().unwrap_or(4)) {
+            summarizer_config.map_reduce.concurrency = val;
+        }
+    }
 
     // Log config info
     println!("Model: {}", summarizer_config.model);

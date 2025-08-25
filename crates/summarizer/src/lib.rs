@@ -57,6 +57,13 @@ struct Choice {
     message: Message,
 }
 
+/// Micro-summary structure for map-reduce
+#[derive(Debug, Clone)]
+struct MicroSummary {
+    text: String,
+    used_segment_ids: Vec<String>,
+}
+
 impl Summarizer {
     /// Create a new summarizer with the given configuration
     pub fn new(config: SummarizerConfig) -> Result<Self, Box<dyn std::error::Error>> {
@@ -85,53 +92,40 @@ impl Summarizer {
         let selected_segments = self.resolve_selected_segments(document, analysis)?;
         debug!("Resolved {} selected segments", selected_segments.len());
 
-        // Build the prompt
-        let prompt = self.build_prompt(document, &selected_segments)?;
-        debug!("Built prompt with {} characters", prompt.len());
+        // Estimate total tokens
+        let total_tokens = self.estimate_total_tokens(&selected_segments);
+        info!(
+            "Estimated total tokens: {}, max context tokens: {}",
+            total_tokens, self.config.map_reduce.max_context_tokens
+        );
 
-        // Try to generate summary via API
-        let api_result = self
-            .generate_summary_via_api(&prompt, &selected_segments)
-            .await;
+        // Decide whether to use map-reduce or single-pass
+        let use_map_reduce = self.config.map_reduce.enabled
+            && total_tokens > self.config.map_reduce.max_context_tokens;
 
-        // Handle API result or fallback
-        let (summary_text, bullets, citations, guardrails, metrics) = match api_result {
-            Ok((summary_text, bullets, citations)) => {
-                let duration = start_time.elapsed();
-                let metrics = SummarizationMetrics {
-                    processing_time_ms: duration.as_millis() as u64,
-                    input_tokens: estimate_tokens(&prompt),
-                    output_tokens: estimate_tokens(&summary_text),
-                };
-                (summary_text, bullets, Some(citations), None, metrics)
-            }
-            Err(e) => {
-                warn!("API call failed: {}. Using extractive fallback.", e);
-                let (summary_text, metrics) =
-                    self.extractive_fallback(&selected_segments, start_time);
-                (
-                    summary_text,
-                    None, // No bullets in extractive fallback
-                    None, // No citations in extractive fallback
-                    Some(GuardrailsInfo {
-                        filtered: true,
-                        reason: Some("API error or timeout, using extractive fallback".to_string()),
-                    }),
-                    metrics,
-                )
-            }
+        // Log decision
+        if use_map_reduce {
+            info!(
+                "Using map-reduce path ({} tokens > {} threshold)",
+                total_tokens, self.config.map_reduce.max_context_tokens
+            );
+        } else {
+            info!(
+                "Using single-pass path ({} tokens <= {} threshold)",
+                total_tokens, self.config.map_reduce.max_context_tokens
+            );
+        }
+
+        // Generate summary based on decision
+        let result = if use_map_reduce {
+            self.summarize_map_reduce(document, &selected_segments, start_time)
+                .await
+        } else {
+            self.summarize_single_pass(document, &selected_segments, start_time)
+                .await
         };
 
-        // Create the response
-        let response = SummarizeResponse {
-            summary_text,
-            bullets,
-            citations,
-            guardrails,
-            metrics,
-        };
-
-        Ok(response)
+        result
     }
 
     /// Resolve selected segment texts by matching IDs from the analysis to segments in the document
@@ -162,6 +156,69 @@ impl Summarizer {
         }
 
         Ok(selected_segments)
+    }
+
+    /// Estimate total tokens for selected segments
+    fn estimate_total_tokens(&self, selected_segments: &[&Segment]) -> usize {
+        selected_segments
+            .iter()
+            .map(|segment| estimate_tokens(&segment.text))
+            .sum()
+    }
+
+    /// Summarize using single-pass approach
+    async fn summarize_single_pass(
+        &self,
+        document: &Document,
+        selected_segments: &[&Segment],
+        start_time: Instant,
+    ) -> Result<SummarizeResponse, Box<dyn std::error::Error>> {
+        // Build the prompt
+        let prompt = self.build_prompt(document, selected_segments)?;
+        debug!("Built prompt with {} characters", prompt.len());
+
+        // Try to generate summary via API
+        let api_result = self
+            .generate_summary_via_api(&prompt, selected_segments)
+            .await;
+
+        // Handle API result or fallback
+        let (summary_text, bullets, citations, guardrails, metrics) = match api_result {
+            Ok((summary_text, bullets, citations)) => {
+                let duration = start_time.elapsed();
+                let metrics = SummarizationMetrics {
+                    processing_time_ms: duration.as_millis() as u64,
+                    input_tokens: estimate_tokens(&prompt),
+                    output_tokens: estimate_tokens(&summary_text),
+                };
+                (summary_text, bullets, Some(citations), None, metrics)
+            }
+            Err(e) => {
+                warn!("API call failed: {}. Using extractive fallback.", e);
+                let (summary_text, metrics) = self.extractive_fallback(selected_segments, start_time);
+                (
+                    summary_text,
+                    None, // No bullets in extractive fallback
+                    None, // No citations in extractive fallback
+                    Some(GuardrailsInfo {
+                        filtered: true,
+                        reason: Some("API error or timeout, using extractive fallback".to_string()),
+                    }),
+                    metrics,
+                )
+            }
+        };
+
+        // Create the response
+        let response = SummarizeResponse {
+            summary_text,
+            bullets,
+            citations,
+            guardrails,
+            metrics,
+        };
+
+        Ok(response)
     }
 
     /// Build a guarded summarization prompt
@@ -375,6 +432,481 @@ impl Summarizer {
         };
 
         (summary, metrics)
+    }
+
+    /// Summarize using map-reduce approach
+    async fn summarize_map_reduce(
+        &self,
+        document: &Document,
+        selected_segments: &[&Segment],
+        start_time: Instant,
+    ) -> Result<SummarizeResponse, Box<dyn std::error::Error>> {
+        // Partition segments into groups
+        let groups = self.partition_segments(selected_segments)?;
+        info!("Partitioned into {} groups for map stage", groups.len());
+
+        // Map stage: generate micro-summaries
+        let map_start = Instant::now();
+        let micro_summaries = self.generate_micro_summaries(document, &groups).await?;
+        let map_duration = map_start.elapsed();
+        info!("Generated {} micro-summaries in {:?}", micro_summaries.len(), map_duration);
+
+        // Reduce stage: merge micro-summaries
+        let reduce_start = Instant::now();
+        let (summary_text, bullets, citations) = self.merge_micro_summaries(document, &micro_summaries).await?;
+        let reduce_duration = reduce_start.elapsed();
+        info!("Merged micro-summaries in {:?}", reduce_duration);
+
+        // Calculate metrics
+        let total_duration = start_time.elapsed();
+        let metrics = SummarizationMetrics {
+            processing_time_ms: total_duration.as_millis() as u64,
+            input_tokens: selected_segments
+                .iter()
+                .map(|s| estimate_tokens(&s.text))
+                .sum(),
+            output_tokens: estimate_tokens(&summary_text),
+        };
+
+        // Create response
+        let response = SummarizeResponse {
+            summary_text,
+            bullets,
+            citations: Some(citations),
+            guardrails: None,
+            metrics,
+        };
+
+        Ok(response)
+    }
+
+    /// Partition segments into groups based on token limit
+    fn partition_segments<'a>(&self, selected_segments: &[&'a Segment]) -> Result<Vec<Vec<&'a Segment>>, Box<dyn std::error::Error>> {
+        let mut groups: Vec<Vec<&'a Segment>> = Vec::new();
+        let mut current_group: Vec<&'a Segment> = Vec::new();
+        let mut current_tokens = 0;
+
+        for segment in selected_segments {
+            let segment_tokens = estimate_tokens(&segment.text);
+            
+            // If adding this segment would exceed the limit and we already have segments in the current group
+            if current_tokens + segment_tokens > self.config.map_reduce.map_group_tokens && !current_group.is_empty() {
+                // Save the current group and start a new one
+                groups.push(current_group);
+                current_group = Vec::new();
+                current_tokens = 0;
+            }
+            
+            // Add the segment to the current group
+            current_group.push(segment);
+            current_tokens += segment_tokens;
+            
+            // If a single segment exceeds the limit, it forms its own group
+            if current_tokens > self.config.map_reduce.map_group_tokens {
+                groups.push(current_group);
+                current_group = Vec::new();
+                current_tokens = 0;
+            }
+        }
+        
+        // Don't forget the last group
+        if !current_group.is_empty() {
+            groups.push(current_group);
+        }
+
+        Ok(groups)
+    }
+
+    /// Generate micro-summaries for each group
+    async fn generate_micro_summaries(
+        &self,
+        document: &Document,
+        groups: &[Vec<&Segment>],
+    ) -> Result<Vec<MicroSummary>, Box<dyn std::error::Error>> {
+        // Limit concurrency
+        let mut micro_summaries = Vec::new();
+        
+        // Process groups with limited concurrency
+        for chunk in groups.chunks(self.config.map_reduce.concurrency) {
+            let mut futures = Vec::new();
+            
+            for group in chunk {
+                let summary_future = self.generate_micro_summary(document, group);
+                futures.push(summary_future);
+            }
+            
+            // Wait for all futures in this chunk to complete
+            let results = futures::future::join_all(futures).await;
+            
+            // Collect results
+            for result in results {
+                micro_summaries.push(result?);
+            }
+        }
+
+        Ok(micro_summaries)
+    }
+
+    /// Generate a micro-summary for a group of segments
+    async fn generate_micro_summary(
+        &self,
+        document: &Document,
+        group: &[&Segment],
+    ) -> Result<MicroSummary, Box<dyn std::error::Error>> {
+        // Build the map prompt
+        let prompt = self.build_map_prompt(document, group)?;
+        debug!("Built map prompt with {} characters", prompt.len());
+
+        // Try to generate micro-summary via API
+        let api_result = self
+            .generate_micro_summary_via_api(&prompt, group)
+            .await;
+
+        match api_result {
+            Ok((text, used_segment_ids)) => {
+                Ok(MicroSummary {
+                    text,
+                    used_segment_ids,
+                })
+            }
+            Err(e) => {
+                warn!("Map API call failed: {}. Using fallback.", e);
+                // Fallback: concatenate first sentences of segments
+                let mut fallback_text = String::new();
+                for segment in group.iter().take(2) {
+                    fallback_text.push_str(&segment.text);
+                    fallback_text.push(' ');
+                }
+                fallback_text = fallback_text.trim().to_string();
+                
+                let used_segment_ids: Vec<String> = group
+                    .iter()
+                    .map(|segment| segment.segment_id.clone())
+                    .collect();
+                
+                Ok(MicroSummary {
+                    text: fallback_text,
+                    used_segment_ids,
+                })
+            }
+        }
+    }
+
+    /// Build a guarded map prompt
+    fn build_map_prompt(
+        &self,
+        document: &Document,
+        group: &[&Segment],
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let mut prompt = String::new();
+
+        // Add document title and language if present
+        if !document.title.is_empty() {
+            prompt.push_str(&format!("Document Title: {}\n", document.title));
+        }
+        if !document.lang.is_empty() {
+            prompt.push_str(&format!("Language: {}\n", document.lang));
+        }
+
+        prompt.push_str("\nSelected Passages:\n");
+
+        // Add selected passages with their IDs
+        for (i, segment) in group.iter().enumerate() {
+            prompt.push_str(&format!("{}. {} (ID: {})\n", i + 1, segment.text, segment.segment_id));
+        }
+
+        prompt.push_str("\nInstructions:\n");
+        prompt.push_str("Please provide a concise summary of the selected passages above in 50-100 words.\n");
+        prompt.push_str("Do not include any information that is not present in the selected passages.\n");
+        prompt.push_str("List the passage IDs that were used in your summary.\n");
+        prompt.push_str("If there is insufficient information to create a meaningful summary, please include a short \"Not in sources\" note.\n");
+
+        Ok(prompt)
+    }
+
+    /// Generate micro-summary via OpenAI-compatible API
+    async fn generate_micro_summary_via_api(
+        &self,
+        prompt: &str,
+        group: &[&Segment],
+    ) -> Result<(String, Vec<String>), Box<dyn std::error::Error>> {
+        // Create the request
+        let request = ChatCompletionRequest {
+            model: self.config.model.clone(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: prompt.to_string(),
+            }],
+            temperature: self.config.temperature,
+            max_tokens: self.config.max_tokens,
+        };
+
+        // Build the API URL
+        let api_url = format!(
+            "{}/chat/completions",
+            self.config.base_url.trim_end_matches('/')
+        );
+
+        // Prepare headers
+        let mut headers = reqwest::header::HeaderMap::new();
+        if let Some(api_key) = &self.config.api_key {
+            headers.insert(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", api_key).parse()?,
+            );
+        }
+        headers.insert(reqwest::header::CONTENT_TYPE, "application/json".parse()?);
+
+        // Make the API call with timeout
+        let timeout_duration = Duration::from_millis(self.config.timeout_ms);
+        let response_result = timeout(
+            timeout_duration,
+            self.client
+                .post(&api_url)
+                .headers(headers)
+                .json(&request)
+                .send(),
+        )
+        .await;
+
+        // Handle timeout
+        let response = match response_result {
+            Ok(Ok(response)) => response,
+            Ok(Err(e)) => return Err(format!("API request failed: {}", e).into()),
+            Err(_) => return Err("API request timed out".into()),
+        };
+
+        // Check status
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(
+                format!("API request failed with status {}: {}", status, error_text).into(),
+            );
+        }
+
+        // Parse response
+        let api_response: ChatCompletionResponse = response.json().await?;
+
+        // Extract content
+        if api_response.choices.is_empty() {
+            return Err("API returned no choices".into());
+        }
+
+        let content = &api_response.choices[0].message.content;
+        
+        // Extract used segment IDs (simple approach - in a real implementation, we might parse them more carefully)
+        let used_segment_ids: Vec<String> = group
+            .iter()
+            .map(|segment| segment.segment_id.clone())
+            .collect();
+
+        Ok((content.clone(), used_segment_ids))
+    }
+
+    /// Merge micro-summaries into a final summary
+    async fn merge_micro_summaries(
+        &self,
+        document: &Document,
+        micro_summaries: &[MicroSummary],
+    ) -> Result<(String, Option<Vec<String>>, Vec<Citation>), Box<dyn std::error::Error>> {
+        // Build the reduce prompt
+        let prompt = self.build_reduce_prompt(document, micro_summaries)?;
+        debug!("Built reduce prompt with {} characters", prompt.len());
+
+        // Try to generate final summary via API
+        let api_result = self
+            .generate_final_summary_via_api(&prompt, micro_summaries)
+            .await;
+
+        match api_result {
+            Ok((summary_text, bullets, citations)) => {
+                Ok((summary_text, bullets, citations))
+            }
+            Err(e) => {
+                warn!("Reduce API call failed: {}. Using fallback.", e);
+                // Fallback: concatenate micro-summaries
+                let mut fallback_text = String::new();
+                for summary in micro_summaries.iter().take(3) {
+                    fallback_text.push_str(&summary.text);
+                    fallback_text.push(' ');
+                }
+                fallback_text = fallback_text.trim().to_string();
+                
+                // Simple citations from all micro-summaries
+                let mut all_segment_ids = Vec::new();
+                for summary in micro_summaries {
+                    all_segment_ids.extend(summary.used_segment_ids.clone());
+                }
+                
+                // Deduplicate while preserving order
+                let mut seen = std::collections::HashSet::new();
+                let citations: Vec<Citation> = all_segment_ids
+                    .into_iter()
+                    .filter(|id| seen.insert(id.clone()))
+                    .map(|segment_id| Citation {
+                        segment_id,
+                        start: 0,
+                        end: 0,
+                    })
+                    .collect();
+                
+                Ok((fallback_text, None, citations))
+            }
+        }
+    }
+
+    /// Build a guarded reduce prompt
+    fn build_reduce_prompt(
+        &self,
+        document: &Document,
+        micro_summaries: &[MicroSummary],
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let mut prompt = String::new();
+
+        // Add document title and language if present
+        if !document.title.is_empty() {
+            prompt.push_str(&format!("Document Title: {}\n", document.title));
+        }
+        if !document.lang.is_empty() {
+            prompt.push_str(&format!("Language: {}\n", document.lang));
+        }
+
+        prompt.push_str("\nMicro-summaries:\n");
+
+        // Add micro-summaries
+        for (i, summary) in micro_summaries.iter().enumerate() {
+            prompt.push_str(&format!("{}. {}\n", i + 1, summary.text));
+        }
+
+        prompt.push_str("\nInstructions:\n");
+        prompt.push_str(&format!("Please provide a concise summary of the micro-summaries above in {} words.\n", self.config.map_reduce.reduce_target_words));
+        prompt.push_str("Also include 3-6 bullet points highlighting the key information.\n");
+        prompt.push_str("Do not include any information that is not present in the micro-summaries.\n");
+        prompt.push_str("If there is insufficient information to create a meaningful summary, please include a short \"Not in sources\" note.\n");
+
+        Ok(prompt)
+    }
+
+    /// Generate final summary via OpenAI-compatible API
+    async fn generate_final_summary_via_api(
+        &self,
+        prompt: &str,
+        micro_summaries: &[MicroSummary],
+    ) -> Result<(String, Option<Vec<String>>, Vec<Citation>), Box<dyn std::error::Error>> {
+        // Create the request
+        let request = ChatCompletionRequest {
+            model: self.config.model.clone(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: prompt.to_string(),
+            }],
+            temperature: self.config.temperature,
+            max_tokens: self.config.max_tokens,
+        };
+
+        // Build the API URL
+        let api_url = format!(
+            "{}/chat/completions",
+            self.config.base_url.trim_end_matches('/')
+        );
+
+        // Prepare headers
+        let mut headers = reqwest::header::HeaderMap::new();
+        if let Some(api_key) = &self.config.api_key {
+            headers.insert(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", api_key).parse()?,
+            );
+        }
+        headers.insert(reqwest::header::CONTENT_TYPE, "application/json".parse()?);
+
+        // Make the API call with timeout
+        let timeout_duration = Duration::from_millis(self.config.timeout_ms);
+        let response_result = timeout(
+            timeout_duration,
+            self.client
+                .post(&api_url)
+                .headers(headers)
+                .json(&request)
+                .send(),
+        )
+        .await;
+
+        // Handle timeout
+        let response = match response_result {
+            Ok(Ok(response)) => response,
+            Ok(Err(e)) => return Err(format!("API request failed: {}", e).into()),
+            Err(_) => return Err("API request timed out".into()),
+        };
+
+        // Check status
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(
+                format!("API request failed with status {}: {}", status, error_text).into(),
+            );
+        }
+
+        // Parse response
+        let api_response: ChatCompletionResponse = response.json().await?;
+
+        // Extract content
+        if api_response.choices.is_empty() {
+            return Err("API returned no choices".into());
+        }
+
+        let content = &api_response.choices[0].message.content;
+
+        // For this implementation, we'll do a simple parse of the response to extract bullets
+        let (summary_text, bullets) = if self.config.style == SummaryStyle::AbstractWithBullets {
+            // Try to split into summary and bullets
+            if let Some(pos) = content.find("\n-") {
+                let summary = content[..pos].trim().to_string();
+                let bullets_str = &content[pos + 1..];
+                let bullet_points: Vec<String> = bullets_str
+                    .lines()
+                    .filter_map(|line| {
+                        let clean_line = line.trim();
+                        if clean_line.starts_with("- ") {
+                            Some(clean_line[2..].to_string())
+                        } else if clean_line.starts_with("* ") {
+                            Some(clean_line[2..].to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                (summary, Some(bullet_points))
+            } else {
+                // If no bullets found, return entire content as summary
+                (content.clone(), None)
+            }
+        } else {
+            // For other styles, return entire content as summary
+            (content.clone(), None)
+        };
+
+        // Collect all used segment IDs and create citations
+        let mut all_segment_ids = Vec::new();
+        for summary in micro_summaries {
+            all_segment_ids.extend(summary.used_segment_ids.clone());
+        }
+        
+        // Deduplicate while preserving order
+        let mut seen = std::collections::HashSet::new();
+        let citations: Vec<Citation> = all_segment_ids
+            .into_iter()
+            .filter(|id| seen.insert(id.clone()))
+            .map(|segment_id| Citation {
+                segment_id,
+                start: 0, // Placeholder values
+                end: 0,   // Placeholder values
+            })
+            .collect();
+
+        Ok((summary_text, bullets, citations))
     }
 }
 
