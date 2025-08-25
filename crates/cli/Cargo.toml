@@ -4,14 +4,20 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-clap = { version = "4.0", features = ["derive"] }
-kernel = { path = "../kernel" }
 analyzer = { path = "../analyzer" }
 summarizer = { path = "../summarizer" }
 websearch = { path = "../websearch" }
-logger = { path = "../logger" }
+kernel = { path = "../kernel" }
 utils = { path = "../utils" }
-serde_json = "1.0"
+logger = { path = "../logger" }
 tokio = { version = "1", features = ["full"] }
-warp = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4.0", features = ["derive"] }
 log = "0.4"
+env_logger = "0.9"
+warp = "0.3"
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "2.1"

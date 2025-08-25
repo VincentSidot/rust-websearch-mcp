@@ -1040,4 +1040,20 @@ mod tests {
         assert!(metrics.input_tokens > 0);
         assert!(metrics.output_tokens > 0);
     }
+
+    #[test]
+    fn test_partition_segments() {
+        let document = create_test_document();
+        let selected_segments = vec![&document.segments[0], &document.segments[1], &document.segments[2]];
+
+        let config = SummarizerConfig::new();
+        let summarizer = Summarizer::new(config).unwrap();
+
+        // Test partitioning with a small group size to force multiple groups
+        let groups = summarizer.partition_segments(&selected_segments).unwrap();
+        
+        // With our token estimation, all segments should fit in one group with default settings
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].len(), 3);
+    }
 }

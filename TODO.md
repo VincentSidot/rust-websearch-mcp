@@ -243,6 +243,7 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
   - Added metrics tracking for map-reduce mode including mode, map calls, concurrency, and timing
   - Preserved single-pass behavior for small inputs with no regression
   - Environment variables take precedence over config values for map-reduce settings
+  - Added unit tests for map-reduce functionality including partitioning segments
 
 ---
 

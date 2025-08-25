@@ -9,29 +9,29 @@ use warp::Filter;
 // Helper function to create a test document
 fn create_test_document() -> Document {
     Document {
-        schema_version: \"1.0.0\".to_string(),
-        doc_id: \"test-doc-123\".to_string(),
-        url: \"https://example.com\".to_string(),
-        title: \"Test Document\".to_string(),
-        lang: \"en\".to_string(),
-        fetched_at: \"2023-01-01T00:00:00Z\".to_string(),
+        schema_version: "1.0.0".to_string(),
+        doc_id: "test-doc-123".to_string(),
+        url: "https://example.com".to_string(),
+        title: "Test Document".to_string(),
+        lang: "en".to_string(),
+        fetched_at: "2023-01-01T00:00:00Z".to_string(),
         segments: vec![
             Segment {
-                segment_id: \"seg-1\".to_string(),
-                text: \"This is the first segment.\".to_string(),
-                path: \"body > p:nth-child(1)\".to_string(),
+                segment_id: "seg-1".to_string(),
+                text: "This is the first segment.".to_string(),
+                path: "body > p:nth-child(1)".to_string(),
                 position: 0,
             },
             Segment {
-                segment_id: \"seg-2\".to_string(),
-                text: \"This is the second segment.\".to_string(),
-                path: \"body > p:nth-child(2)\".to_string(),
+                segment_id: "seg-2".to_string(),
+                text: "This is the second segment.".to_string(),
+                path: "body > p:nth-child(2)".to_string(),
                 position: 1,
             },
             Segment {
-                segment_id: \"seg-3\".to_string(),
-                text: \"This is the third segment.\".to_string(),
-                path: \"body > p:nth-child(3)\".to_string(),
+                segment_id: "seg-3".to_string(),
+                text: "This is the third segment.".to_string(),
+                path: "body > p:nth-child(3)".to_string(),
                 position: 2,
             },
         ],
@@ -42,25 +42,78 @@ fn create_test_document() -> Document {
 // Helper function to create a test analysis response
 fn create_test_analysis() -> AnalyzeResponse {
     AnalyzeResponse {
-        doc_id: \"test-doc-123\".to_string(),
-        model_fingerprint: \"model456\".to_string(),
+        doc_id: "test-doc-123".to_string(),
+        model_fingerprint: "model456".to_string(),
         top_segments: vec![
             SegmentScore {
-                segment_id: \"seg-1\".to_string(),
+                segment_id: "seg-1".to_string(),
                 score_representative: 0.95,
                 score_diversity: 0.85,
-                reason: \"Highly central\".to_string(),
+                reason: "Highly central".to_string(),
+                score_rerank: None,
             },
             SegmentScore {
-                segment_id: \"seg-2\".to_string(),
+                segment_id: "seg-2".to_string(),
                 score_representative: 0.85,
                 score_diversity: 0.75,
-                reason: \"Diverse content\".to_string(),
+                reason: "Diverse content".to_string(),
+                score_rerank: None,
             },
         ],
-        metrics: core::AnalysisMetrics {
+        metrics: kernel::AnalysisMetrics {
             num_segments: 3,
             top_n: 2,
+            mmr_lambda: 0.65,
+            avg_pairwise_cosine: 0.3,
+        },
+    }
+}
+
+// Helper function to create a large test document for map-reduce testing
+fn create_large_test_document() -> Document {
+    let mut segments = Vec::new();
+    // Create segments with enough text to trigger map-reduce
+    for i in 0..10 {
+        segments.push(Segment {
+            segment_id: format!("seg-{}", i),
+            text: format!("This is segment {} with enough text to make it longer and test the map-reduce functionality. This text needs to be long enough to trigger token limits in our tests.", i),
+            path: format!("body > p:nth-child({})", i + 1),
+            position: i,
+        });
+    }
+    
+    Document {
+        schema_version: "1.0.0".to_string(),
+        doc_id: "large-test-doc-123".to_string(),
+        url: "https://example.com/large".to_string(),
+        title: "Large Test Document".to_string(),
+        lang: "en".to_string(),
+        fetched_at: "2023-01-01T00:00:00Z".to_string(),
+        segments,
+        hints: None,
+    }
+}
+
+// Helper function to create a large test analysis response
+fn create_large_test_analysis() -> AnalyzeResponse {
+    let mut top_segments = Vec::new();
+    for i in 0..10 {
+        top_segments.push(SegmentScore {
+            segment_id: format!("seg-{}", i),
+            score_representative: 0.95 - (i as f32 * 0.05),
+            score_diversity: 0.85 - (i as f32 * 0.05),
+            reason: format!("Segment {}", i),
+            score_rerank: None,
+        });
+    }
+    
+    AnalyzeResponse {
+        doc_id: "large-test-doc-123".to_string(),
+        model_fingerprint: "model456".to_string(),
+        top_segments,
+        metrics: kernel::AnalysisMetrics {
+            num_segments: 10,
+            top_n: 10,
             mmr_lambda: 0.65,
             avg_pairwise_cosine: 0.3,
         },
@@ -71,14 +124,14 @@ fn create_test_analysis() -> AnalyzeResponse {
 async fn start_mock_api_server() -> (String, SocketAddr) {
     // Create a mock response
     let mock_response = warp::post()
-        .and(warp::path(\"chat\"))
-        .and(warp::path(\"completions\"))
+        .and(warp::path("chat"))
+        .and(warp::path("completions"))
         .map(|| {
             warp::reply::json(&json!({
-                \"choices\": [{
-                    \"message\": {
-                        \"role\": \"assistant\",
-                        \"content\": \"This is a test summary.\\n\\n- Point 1\\n- Point 2\"
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "This is a test summary.\n\n- Point 1\n- Point 2"
                     }
                 }]
             }))
@@ -86,9 +139,9 @@ async fn start_mock_api_server() -> (String, SocketAddr) {
 
     // Start the server
     let server = warp::serve(mock_response);
-    let listener = TcpListener::bind(\"127.0.0.1:0\").await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let server_addr = format!(\"http://{}\", addr);
+    let server_addr = format!("http://{}", addr);
 
     tokio::spawn(async move {
         server.run(listener).await;
@@ -109,12 +162,19 @@ async fn test_summarize_with_mock_api() {
     // Create summarizer config
     let config = crate::config::SummarizerConfig {
         base_url: server_addr,
-        model: \"test-model\".to_string(),
+        model: "test-model".to_string(),
         timeout_ms: 5000,
         temperature: 0.2,
         max_tokens: None,
         style: crate::config::SummaryStyle::AbstractWithBullets,
         api_key: None,
+        map_reduce: crate::config::MapReduceConfig {
+            enabled: false,
+            max_context_tokens: 6000,
+            map_group_tokens: 1000,
+            reduce_target_words: 200,
+            concurrency: 4,
+        },
     };
 
     // Create summarizer
@@ -124,11 +184,11 @@ async fn test_summarize_with_mock_api() {
     let response = summarizer.summarize(&document, &analysis).await.unwrap();
 
     // Check response
-    assert_eq!(response.summary_text, \"This is a test summary.\");
+    assert_eq!(response.summary_text, "This is a test summary.");
     assert!(response.bullets.is_some());
     assert_eq!(response.bullets.as_ref().unwrap().len(), 2);
-    assert_eq!(response.bullets.as_ref().unwrap()[0], \"Point 1\");
-    assert_eq!(response.bullets.as_ref().unwrap()[1], \"Point 2\");
+    assert_eq!(response.bullets.as_ref().unwrap()[0], "Point 1");
+    assert_eq!(response.bullets.as_ref().unwrap()[1], "Point 2");
     assert!(response.citations.is_some());
     assert_eq!(response.citations.as_ref().unwrap().len(), 2);
     assert!(response.guardrails.is_none());
@@ -145,13 +205,20 @@ async fn test_summarize_timeout_fallback() {
 
     // Create summarizer config with a very short timeout and invalid URL
     let config = crate::config::SummarizerConfig {
-        base_url: \"http://10.255.255.1\".to_string(), // Unreachable IP
-        model: \"test-model\".to_string(),
+        base_url: "http://10.255.255.1".to_string(), // Unreachable IP
+        model: "test-model".to_string(),
         timeout_ms: 100, // Very short timeout
         temperature: 0.2,
         max_tokens: None,
         style: crate::config::SummaryStyle::AbstractWithBullets,
         api_key: None,
+        map_reduce: crate::config::MapReduceConfig {
+            enabled: false,
+            max_context_tokens: 6000,
+            map_group_tokens: 1000,
+            reduce_target_words: 200,
+            concurrency: 4,
+        },
     };
 
     // Create summarizer
@@ -167,7 +234,55 @@ async fn test_summarize_timeout_fallback() {
     assert!(response.guardrails.is_some());
     assert_eq!(
         response.guardrails.as_ref().unwrap().reason,
-        Some(\"API error or timeout, using extractive fallback\".to_string())
+        Some("API error or timeout, using extractive fallback".to_string())
     );
     assert!(response.metrics.processing_time_ms > 0);
+}
+
+#[tokio::test]
+async fn test_summarize_map_reduce() {
+    // Start mock API server
+    let (server_addr, _addr) = start_mock_api_server().await;
+
+    // Create large test data
+    let document = create_large_test_document();
+    let analysis = create_large_test_analysis();
+
+    // Create summarizer config with map-reduce enabled and low threshold to trigger it
+    let config = crate::config::SummarizerConfig {
+        base_url: server_addr,
+        model: "test-model".to_string(),
+        timeout_ms: 5000,
+        temperature: 0.2,
+        max_tokens: None,
+        style: crate::config::SummaryStyle::AbstractWithBullets,
+        api_key: None,
+        map_reduce: crate::config::MapReduceConfig {
+            enabled: true,
+            max_context_tokens: 10, // Low threshold to trigger map-reduce
+            map_group_tokens: 500,
+            reduce_target_words: 100,
+            concurrency: 2,
+        },
+    };
+
+    // Create summarizer
+    let summarizer = crate::Summarizer::new(config).unwrap();
+
+    // Summarize
+    let response = summarizer.summarize(&document, &analysis).await.unwrap();
+
+    // Check response
+    assert_eq!(response.summary_text, "This is a test summary.");
+    assert!(response.bullets.is_some());
+    assert_eq!(response.bullets.as_ref().unwrap().len(), 2);
+    assert_eq!(response.bullets.as_ref().unwrap()[0], "Point 1");
+    assert_eq!(response.bullets.as_ref().unwrap()[1], "Point 2");
+    assert!(response.citations.is_some());
+    // Check that we have citations (map-reduce should preserve them)
+    assert!(!response.citations.as_ref().unwrap().is_empty());
+    assert!(response.guardrails.is_none());
+    assert!(response.metrics.processing_time_ms > 0);
+    assert!(response.metrics.input_tokens > 0);
+    assert!(response.metrics.output_tokens > 0);
 }
