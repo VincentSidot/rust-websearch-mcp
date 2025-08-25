@@ -319,12 +319,21 @@ This project (`rust-websearch-mcp`) is a **self-hosted pipeline** for:
   - Updated README with documentation for summarizer cache functionality
   - Verified cache functionality with integration tests showing significant API cost reduction
 
+### Progress Log
+
+- **2025-08-25**: Step 6A (reworked): Healthcheck, config print (redacted), lightweight metrics (no tracing)
+  - Implemented `cli health` command that checks analyzer models, caches, and summarizer API reachability
+  - Added `cli config print` command with secret redaction and JSON output options
+  - Enhanced `cli run` with end-of-run metrics summary, `--metrics-json` output, and optional `/metrics` HTTP endpoint
+  - Added lightweight metrics collection without tracing/structured-logging
+  - Verified workspace builds and existing tests pass
+
 ---
 
 ## 6) Observability
 
-- [ ] Metrics: per-stage latency, cache hit rate, token usage, redundancy.
-- [ ] `--healthcheck` for analyzer (models load) and summarizer (API reachable).
+- [x] Metrics: per-stage latency, cache hit rate, token usage, redundancy.
+- [x] `--healthcheck` for analyzer (models load) and summarizer (API reachable).
 
 **Crates**: `tracing`, `tracing-subscriber`, optional `metrics` + `metrics-exporter-prometheus`
 

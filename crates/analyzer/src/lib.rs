@@ -234,6 +234,11 @@ impl Analyzer {
         &self.model_fingerprint
     }
 
+    /// Get a reference to the embedding cache
+    pub fn cache(&self) -> &EmbeddingCache {
+        &self.cache
+    }
+
     /// Build a query text for reranking based on the document
     fn build_rerank_query(&self, document: &Document) -> String {
         match self.config.reranker.query_mode.as_str() {

@@ -82,6 +82,38 @@ cargo run --bin cli -- run --rerank <url>
 cargo run --bin cli -- run --out-dir ./my-output <url>
 ```
 
+### Health Check
+
+The CLI includes a health check command to verify that all components are properly configured and functional:
+
+```bash
+# Run health check
+cargo run --bin cli -- health
+
+# Alternative alias
+cargo run --bin cli -- healthcheck
+```
+
+The health check verifies:
+- Analyzer model files are accessible
+- ONNX Runtime sessions can be created
+- Reranker models (if enabled) are accessible
+- Analyzer and summarizer caches are accessible
+- Summarizer base URL is reachable
+- API key presence (reports DEGRADED if missing but doesn't fail)
+
+### Configuration Print
+
+You can view the effective configuration (with secrets redacted) using the config print command:
+
+```bash
+# Print configuration in human-readable format
+cargo run --bin cli -- config print
+
+# Print configuration in JSON format
+cargo run --bin cli -- config print --json
+```
+
 ## Configuration
 
 Create a `config/config.toml` file based on `config/config.example.toml` to customize behavior.
@@ -180,6 +212,54 @@ The summarizer caches complete summary responses to avoid repeated LLM calls for
   - Use `--no-summary-cache` flag with `summarize` or `run` commands
 
 Cache entries are persisted using the `sled` embedded database and can be inspected or cleared using the CLI commands.
+
+## Metrics
+
+The pipeline collects and reports lightweight metrics at the end of each run:
+
+- **Per-stage timing**: Scrape, analyze, and summarize durations
+- **Cache hit rates**: Analyzer and summarizer cache performance
+- **Token usage**: Input and output tokens from the LLM (when available)
+- **Redundancy**: Average pairwise cosine similarity among selected segments
+
+### Metrics Summary
+
+At the end of each run, a concise metrics summary is printed to the console:
+
+```
+--- Metrics Summary ---
+Scraping time: 125 ms
+Analysis time: 456 ms
+Summarization time: 1234 ms
+Analyzer cache hit rate: 85.71%
+Summarizer cache hit: No
+Input tokens: 1250
+Output tokens: 150
+Average pairwise cosine similarity: 0.2345
+```
+
+### JSON Metrics Output
+
+You can output metrics in JSON format using the `--metrics-json` flag:
+
+```bash
+# Output metrics to stdout as JSON
+cargo run --bin cli -- run --metrics-json - <url>
+
+# Output metrics to a file
+cargo run --bin cli -- run --metrics-json metrics.json <url>
+```
+
+### Metrics HTTP Endpoint
+
+For monitoring during long-running processes, you can expose metrics via a simple HTTP endpoint:
+
+```bash
+# Start metrics server on port 8080
+cargo run --bin cli -- run --metrics-port 8080 <url>
+```
+
+Once the pipeline starts, you can access metrics at `http://localhost:8080/metrics`. The metrics server is disabled by default and only starts when explicitly requested.
 
 ## Output Files
 
