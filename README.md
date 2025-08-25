@@ -2,6 +2,8 @@
 
 ⚠️ **Early Development** — This project is currently in active development and should be considered experimental.
 
+⚠️ **Known Issue** — This project uses ONNX Runtime for local embeddings processing. There is a known issue with mutex cleanup in ONNX Runtime on macOS that causes a harmless error message during application exit. This does not affect the functionality of the application. For more information, see [this issue](https://github.com/microsoft/onnxruntime/pull/25134).
+
 A self-hosted pipeline for web scraping and smart summarization using local embeddings and LLM APIs.
 
 ## Overview
