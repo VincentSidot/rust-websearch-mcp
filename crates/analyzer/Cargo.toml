@@ -50,5 +50,5 @@ tempfile = "3.0"
 [build-dependencies]
 # For the build script (Windows): download + unzip a .nupkg (zip)
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
-zip = "4.5.0"
+zip = "6.0.0"
 anyhow = "1"
